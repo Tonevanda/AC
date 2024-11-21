@@ -1,4 +1,4 @@
-tmID,year,hasWon,points,assists,steals,blocks,rebounds
+tmID,year,hasWon,BPpoints,BPassists,BPsteals,BPblocks,BPrebounds
 CHA,2,0,565.0,121.0,55.0,23.0,136.0
 CLE,2,0,373.0,61.0,29.0,18.0,172.0
 DET,2,0,441.0,39.0,20.0,10.0,219.0
