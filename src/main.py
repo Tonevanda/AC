@@ -3,16 +3,13 @@ import numpy as np
 from sklearn.utils import resample
 from sklearn.preprocessing import StandardScaler
 import xgboost as xgb
-from sklearn.linear_model import LogisticRegression
 from sklearn.linear_model import LinearRegression
-from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.svm import SVR
 from sklearn.neural_network import MLPClassifier
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.metrics import f1_score
-from sklearn.metrics import make_scorer
 from sklearn.model_selection import GridSearchCV
-from functools import partial
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, f1_score, make_scorer
 
 
 def loadData():
@@ -66,16 +63,6 @@ def players_per_team_averages(players_per_team, coaches, year, team_info, player
     coaches_year = coaches_year.drop(columns=['stint'])
 
 
-
-    
-
-
-
-
-
-    
-
-
     player_averages = weighted_average_attributes(players_per_team_prev_years, year, player_info, "playerID")
 
     player_averages['Total'] = player_averages.sum(axis=1)
@@ -83,7 +70,10 @@ def players_per_team_averages(players_per_team, coaches, year, team_info, player
     player_averages.reset_index()
 
 
-    players_per_team_year = players_per_team_year[['playerID', 'year', 'tmID', 'finals']]
+    players_per_team_year = players_per_team_year[['playerID', 'year', 'tmID', 'won', 'lost']]
+
+    players_per_team_year['winRatio'] = players_per_team_year['won'] / (players_per_team_year['won'] + players_per_team_year['lost'])
+    players_per_team_year = players_per_team_year.drop(columns=['won', 'lost'])
 
 
     players_per_team_year = pd.merge(players_per_team_year, player_averages, how="inner", on="playerID")
@@ -133,24 +123,22 @@ def players_per_team_averages(players_per_team, coaches, year, team_info, player
     players_per_team_year = pd.merge(players_per_team_year, coaches_year, how="inner", on=["tmID"])
 
 
-    columns = ['tmID', 'year', 'finals']
+    columns = ['tmID', 'year', 'winRatio']
     columns.extend(team_info)
     columns.extend(player_info)
     columns.extend(coach_info)
     players_per_team_year = players_per_team_year[columns]
 
 
-    players_per_team_year['finals'] = players_per_team_year['finals'].fillna('L')
-
-    players_per_team_year = players_per_team_year.rename(columns={'finals': 'hasWon'})
-
-    players_per_team_year['hasWon'] = players_per_team_year['hasWon'].map({'L': 0, 'W': 1})
 
     return players_per_team_year
 
 def balance_data(data):
-    minority_class = data[data['hasWon'] == 1]
-    majority_class = data[data['hasWon'] == 0]
+    most_common_value = data['winRatio'].value_counts().idxmax()
+    minority_class = data[data['winRatio'] != most_common_value]
+    majority_class = data[data['winRatio'] == most_common_value]
+
+
 
     minority_oversampled = resample(
         minority_class,
@@ -190,16 +178,15 @@ def main():
 
     coach_info = ['coachWinRatio', 'coachPostWinRatio']
 
-    columns = ['tmID', 'year', 'hasWon']
+    columns = ['tmID', 'year', 'winRatio']
     columns.extend(team_info)
     columns.extend(player_info)
     columns.extend(coach_info)
 
     data = pd.DataFrame(columns=columns)
-    #test_table = pd.DataFrame(columns=columns)
 
 
-    columns = ['tmID', 'year', 'finals']
+    columns = ['tmID', 'year']
     columns.extend(team_info)
     teams = teams[columns]
     players_team_columns = ['playerID', 'year', 'tmID', 'stint']
@@ -211,19 +198,11 @@ def main():
     for year in range(2, 11):
         data = pd.concat([data, players_per_team_averages(players_per_team, coaches, year, team_info, player_info, coach_info)])
 
-    #test_table = pd.concat([test_table, players_per_team_averages(players_per_team, 10, team_info, player_info)])
 
     data = rename_attributes(data, player_info)
 
-    data['hasWon'] = data['hasWon'].astype(int)
-
-    #test_table = rename_attributes(test_table, player_info)
-
-
-    #training_table = balance_data(training_table)
     
     data.to_csv("data.csv", index=False)
-    #test_table.to_csv("test.csv", index=False)
 
     print('\n\n')
 
@@ -231,18 +210,16 @@ def main():
 
     train_data = data[data['year'] < current_year]
     train_data = balance_data(train_data)
-    train_data_labels = train_data['hasWon']
+    train_data_labels = train_data['winRatio']
     
 
     test_data = data[data['year'] == current_year]
-    test_data_labels = test_data['hasWon']
+    test_data_labels = test_data['winRatio']
     
-    train_year = train_data['year']
-    train_tmID = train_data['tmID']
-    train_data = train_data.drop(columns=['hasWon', 'year', 'tmID'])
-    test_tmID = test_data['tmID']
-    test_year = test_data['year']
-    test_data = test_data.drop(columns=['year', 'hasWon', 'tmID'])
+    train_data = train_data.drop(columns=['winRatio', 'year', 'tmID'])
+    test_data_tmID = test_data['tmID']
+    test_data_winRatio = test_data['winRatio']
+    test_data = test_data.drop(columns=['year', 'winRatio', 'tmID'])
     
 
     total_ints = team_info.copy()
@@ -260,78 +237,36 @@ def main():
     test_data.loc[:, total_ints] = scaler.transform(test_data[total_ints])
 
 
+
+    
     def train_model(classifier, x, y):
         classifier.fit(x, y)
 
-    def get_predictions(classifier, features, years, tmID):
-        label_probabilities = classifier.predict_proba(features)
-        features_copy = features.copy()
-        features_copy['year'] = years
-        features_copy['tmID'] = tmID
-        win_probabilities = []
-        for prob in label_probabilities:
-            win_probabilities.append(prob[1])
-        features_copy['probability'] = win_probabilities
 
-
-        
-        for i in range(1, 12):
-            features_year = features_copy[features_copy['year'] == i]
-            if not features_year.empty:
-                best_winner_probability = 0
-                best_winner_tmID = ""
-                for w_prob, tmID in zip(features_year['probability'], features_year['tmID']):
-                    if(w_prob > best_winner_probability):
-                        best_winner_probability = w_prob
-                        best_winner_tmID = tmID
-
-                predictions = []
-
-
-                for tmID in features_year['tmID']:
-                    if(tmID == best_winner_tmID):
-                        predictions.append(1)
-                    else:
-                        predictions.append(0)
-
-                features_year.loc[:, ['probability']] = predictions
-                features_copy.loc[features_copy['year'] == i, :] = features_year.values
-
-        
-        return features_copy["probability"]
-    def teste():
-        return None
-    def f1(features, labels, classifier, years=train_year, tmID=train_tmID):
-        predictions = get_predictions(classifier, features, years, tmID)
-        return f1_score(labels, labels, pos_label=1) * 100.0
     
-    def accuracy(features, labels, classifier, years=None, tmID=None):
-        predictions = get_predictions(classifier, features, years, tmID)
-        return (sum(labels == predictions) / float(len(predictions))) * 100.0
-
-
-
-    def predict_labels(classifier, features, labels, years=None, tmID=None):
+    def train_predict(model, x_train, y_train, x_test, y_test, printResults = False):
+        def predict_labels(model, features, labels):
+            predictions = model.predict(features)
+            return predictions, mean_absolute_error(labels, predictions), mean_squared_error(labels, predictions), r2_score(labels, predictions)
         
-        return classifier.predict_proba(features), get_predictions(classifier, features, years, tmID), f1(features, labels, classifier, years, tmID), accuracy(features, labels, classifier, years, tmID)
-    
-    def train_predict(classifier, x_train, y_train, x_test, y_test, train_years=None, train_tmID=None, test_years = None, test_tmID = None, printResults = False):
         if(printResults):
-            print("Training using " + classifier.__class__.__name__)
+            print("Training using " + model.__class__.__name__)
 
-        train_model(classifier, x_train, y_train)
+        train_model(model, x_train, y_train)
 
-        _, predictions, train_f1, acc = predict_labels(classifier, x_train, y_train, train_years, train_tmID)
+        _, train_mae, train_mse, train_r2 = predict_labels(model, x_train, y_train)
         if(printResults):
-            print("F1 score for the training set: " + str(train_f1) + '%')
-            print("Accuracy score for the training set: " + str(acc) + '%\n\n')
+            print("Mean Absolute Error for the train set: " + str(train_mae) + '%')
+            print("Mean Squared Error for the train set: " + str(train_mse) + '%')
+            print("R2 Score for the train set: " + str(train_r2) + '%\n\n')
 
-        probabilities, predictions, f1, acc = predict_labels(classifier, x_test, y_test, test_years, test_tmID)
+        predictions, mae, mse, r2 = predict_labels(model, x_test, y_test)
         if(printResults):
-            print("F1 score for the test set: " + str(f1) + '%')
-            print("Accuracy score for the test set: " + str(acc) + '%\n\n')
+            print("Mean Absolute Error for the test set: " + str(mae) + '%')
+            print("Mean Squared Error for the test set: " + str(mse) + '%')
+            print("R2 Score for the test set: " + str(r2) + '%\n\n')
 
-        return probabilities, predictions, f1, acc, train_f1
+        return predictions, mae, mse, r2, train_mae, train_mse, train_r2
     
     def fine_tune_classifier(classifier, train_data, train_data_labels, train_years, train_tmID):
         parameter_svc = {
@@ -382,27 +317,32 @@ def main():
         return None
 
 
-    classifiers = [LogisticRegression(random_state=42), SVC(random_state=912, kernel="rbf", probability=True), MLPClassifier(hidden_layer_sizes=(100,), max_iter=1000, random_state=42),
-                    DecisionTreeClassifier(random_state=42), KNeighborsClassifier(n_neighbors=5)]
-
-
+    models = [LinearRegression(), DecisionTreeRegressor(random_state=42), RandomForestRegressor(random_state=42), SVR()]
     #xgboost = xgb.XGBClassifier(seed=82)
 
-    best_classifier = None
-    best_f1 = 0
-    best_train_f1 = 0
+    best_model = None
 
-    for classifier in classifiers:
-        _, _, _f1, acc, train_f1 = train_predict(classifier, train_data, train_data_labels, test_data, test_data_labels, train_year, train_tmID, test_year, test_tmID, False)
-        if (_f1 > best_f1) or (_f1 == best_f1 and train_f1 > best_train_f1):
-            best_classifier = classifier
-            best_f1 = _f1
+
+
+    for model in models:
+        test_predictions, mae, mse, r2, train_mae, train_mse, train_r2 = train_predict(model, train_data, train_data_labels, test_data, test_data_labels, True)
+        '''if (test_f1 > best_f1) or (test_f1 == best_f1 and test_acc > best_acc) or (test_f1 == best_f1 and test_acc == best_acc and train_f1 > best_train_f1) or (test_f1 == best_f1 and test_acc == best_acc and train_f1 == best_train_f1 and train_acc > best_train_acc):
+            best_model = model
+            best_f1 = test_f1
+            best_acc = test_acc
             best_train_f1 = train_f1
+            best_train_acc = train_acc'''
 
 
-    print("The best Classifier is " + best_classifier.__class__.__name__)
+    print("The best Model is " + model.__class__.__name__)
 
+    test_data['tmID'] = test_data_tmID
+    test_data['winRatio'] = test_data_winRatio
+    test_data['predictions'] = test_predictions
 
+    print(test_data)
+
+    '''
     #predictions,  _, _ = train_predict(best_classifier, train_data, train_data_labels, test_data, test_data_labels, True)
 
     #probabilities, predictions, _, _, _, = train_predict(best_classifier, train_data, train_data_labels, test_data, test_data_labels, train_year, train_tmID, test_year, test_tmID, True)
@@ -430,7 +370,7 @@ def main():
     test_data['hasWon'] = predictions
     test_data['probs'] = predictions_probs
 
-    print(test_data)
+    print(test_data)'''
 
 
 
