@@ -22,7 +22,7 @@ def loadData():
     series_post = pd.read_csv("../data/series_post.csv")
     return awards_players, coaches, players_teams, players, teams_post, teams, series_post
 
-def weighted_average_attributes(players_per_team_prev_years_original, current_year, columns, groupby_attribute):
+def weighted_average_attributes(players_per_team_prev_years_original, players_per_team_year, current_year, columns, groupby_attribute):
     players_per_team_prev_years = players_per_team_prev_years_original.copy()
     k = 0.5
     players_per_team_prev_years['Weight'] = np.exp(-k * (current_year - players_per_team_prev_years['year']))
@@ -37,6 +37,25 @@ def weighted_average_attributes(players_per_team_prev_years_original, current_ye
     summed_weights = players_per_team_prev_years['Weight'].unique().sum()
     for attribute in columns:
         attribute_averages[attribute] = attribute_averages[attribute] / summed_weights
+    if groupby_attribute == "playerID":
+        attribute_averages['Total'] = attribute_averages.sum(axis=1)
+
+    attribute_averages.reset_index(inplace=True)
+
+
+    all_players_prev_years = attribute_averages[groupby_attribute].unique()
+
+
+    current_year_players = players_per_team_year[groupby_attribute]
+
+    for player in current_year_players:
+        if player not in all_players_prev_years:
+            new_row = pd.DataFrame(
+                {col: 0 for col in attribute_averages.columns}, index=[0]
+            )
+            new_row[groupby_attribute] = player
+            attribute_averages = pd.concat([attribute_averages, new_row])
+
 
     return attribute_averages
 
@@ -48,11 +67,11 @@ def players_per_team_averages(players_per_team, coaches, year, team_info, player
     If year is 7, it will calculate the averages for the years 1 to 6.
     """
     players_per_team_year = players_per_team[players_per_team["year"] == year]
-    players_per_team_year = players_per_team_year[players_per_team_year['stint'] == 0]
+    players_per_team_year = players_per_team_year[players_per_team_year['stint'] < 2]
 
 
     coaches_year = coaches[coaches["year"] == year]
-    coaches_year = coaches_year[coaches_year['stint'] == 0]
+    coaches_year = coaches_year[coaches_year['stint'] < 2]
 
     players_per_team_prev_years = players_per_team[players_per_team["year"] < year].copy()
     coaches_prev_years = coaches[coaches["year"] < year].copy()
@@ -63,17 +82,14 @@ def players_per_team_averages(players_per_team, coaches, year, team_info, player
     coaches_year = coaches_year.drop(columns=['stint'])
 
 
-    player_averages = weighted_average_attributes(players_per_team_prev_years, year, player_info, "playerID")
-
-    player_averages['Total'] = player_averages.sum(axis=1)
-
-    player_averages.reset_index()
+    player_averages = weighted_average_attributes(players_per_team_prev_years, players_per_team_year, year, player_info, "playerID")
 
 
-    players_per_team_year = players_per_team_year[['playerID', 'year', 'tmID', 'won', 'lost']]
 
-    players_per_team_year['winRatio'] = players_per_team_year['won'] / (players_per_team_year['won'] + players_per_team_year['lost'])
-    players_per_team_year = players_per_team_year.drop(columns=['won', 'lost'])
+    players_per_team_year = players_per_team_year[['playerID', 'year', 'tmID', 'playoff', 'winRatio']]
+
+
+
 
 
     players_per_team_year = pd.merge(players_per_team_year, player_averages, how="inner", on="playerID")
@@ -83,9 +99,8 @@ def players_per_team_averages(players_per_team, coaches, year, team_info, player
     coach_info_2 = ['won', 'lost', 'post_wins', 'post_losses']
 
 
-    coach_averages = weighted_average_attributes(coaches_prev_years, year, coach_info_2, "coachID")
+    coach_averages = weighted_average_attributes(coaches_prev_years, coaches_year, year, coach_info_2, "coachID")
 
-    coach_averages.reset_index()
 
     
     coaches_year = coaches_year[['coachID', 'tmID']]
@@ -108,22 +123,21 @@ def players_per_team_averages(players_per_team, coaches, year, team_info, player
 
 
     teams_prev_years = players_per_team_prev_years.drop_duplicates(subset=['tmID', 'year'])
+    teams_current_year = players_per_team_year.drop_duplicates(subset=['tmID', 'year'])
 
-    team_averages = weighted_average_attributes(teams_prev_years, year, team_info, "tmID")
-
-
-
-    team_averages.reset_index()
-
+    team_averages = weighted_average_attributes(teams_prev_years, teams_current_year, year, team_info, "tmID")
 
 
 
     players_per_team_year = pd.merge(players_per_team_year, team_averages, how="inner", on=["tmID"])
 
+
+
     players_per_team_year = pd.merge(players_per_team_year, coaches_year, how="inner", on=["tmID"])
 
 
-    columns = ['tmID', 'year', 'winRatio']
+
+    columns = ['tmID', 'year', 'playoff', 'winRatio']
     columns.extend(team_info)
     columns.extend(player_info)
     columns.extend(coach_info)
@@ -169,6 +183,14 @@ def main():
     pd.set_option('display.max_rows', None)
     awards_players, coaches, players_teams, players, teams_post, teams, series_post = loadData()
 
+    teams['winRatio'] = teams['won'] / (teams['won'] + teams['lost'])
+    teams['playoff'] = 'N'
+    for year in range(1, 12):
+        teams_in_year = teams[teams['year'] == year]
+        if not teams_in_year.empty:
+            top_8_teams = teams_in_year.nlargest(8, 'winRatio').index
+            teams.loc[top_8_teams, 'playoff'] = 'Y'
+
 
     team_info = ['rank', 'o_fgm', 'o_fga', 'o_ftm', 'o_fta', 'o_3pm', 'o_3pa', 'o_oreb', 'o_dreb', 'o_reb', 'o_asts', 'o_pf', 'o_stl', 'o_to', 'o_blk', 'o_pts', 'd_fgm', 'd_ftm', 'd_fta', 'd_3pm', 'd_3pa', 'd_oreb', 'd_dreb', 'd_reb', 'd_asts', 'd_pf', 'd_stl', 'd_to', 'd_blk', 'd_pts', 'won', 'lost', 'confW', 'confL', 'min', 'attend']
 
@@ -178,7 +200,7 @@ def main():
 
     coach_info = ['coachWinRatio', 'coachPostWinRatio']
 
-    columns = ['tmID', 'year', 'winRatio']
+    columns = ['tmID', 'year', 'playoff', 'winRatio']
     columns.extend(team_info)
     columns.extend(player_info)
     columns.extend(coach_info)
@@ -186,7 +208,7 @@ def main():
     data = pd.DataFrame(columns=columns)
 
 
-    columns = ['tmID', 'year']
+    columns = ['tmID', 'year', 'playoff', 'winRatio']
     columns.extend(team_info)
     teams = teams[columns]
     players_team_columns = ['playerID', 'year', 'tmID', 'stint']
@@ -209,17 +231,18 @@ def main():
     current_year = 10
 
     train_data = data[data['year'] < current_year]
-    train_data = balance_data(train_data)
+    #train_data = balance_data(train_data)
     train_data_labels = train_data['winRatio']
     
 
     test_data = data[data['year'] == current_year]
     test_data_labels = test_data['winRatio']
     
-    train_data = train_data.drop(columns=['winRatio', 'year', 'tmID'])
+    train_data = train_data.drop(columns=['winRatio', 'year', 'tmID', 'playoff'])
     test_data_tmID = test_data['tmID']
     test_data_winRatio = test_data['winRatio']
-    test_data = test_data.drop(columns=['year', 'winRatio', 'tmID'])
+    test_data_playoff = test_data['playoff']
+    test_data = test_data.drop(columns=['year', 'winRatio', 'tmID', 'playoff'])
     
 
     total_ints = team_info.copy()
@@ -258,7 +281,7 @@ def main():
         if(printResults):
             print("Mean Absolute Error for the train set: " + str(train_mae) + '%')
             print("Mean Squared Error for the train set: " + str(train_mse) + '%')
-            print("R2 Score for the train set: " + str(train_r2) + '%\n\n')
+            print("R2 Score for the train set: " + str(train_r2) + '%\n')
 
         predictions, mae, mse, r2 = predict_labels(model, x_test, y_test)
         if(printResults):
@@ -268,79 +291,109 @@ def main():
 
         return predictions, mae, mse, r2, train_mae, train_mse, train_r2
     
-    def fine_tune_classifier(classifier, train_data, train_data_labels, train_years, train_tmID):
-        parameter_svc = {
-            'C': [0.1, 1, 10, 100],               # Regularization strength
-            'kernel': ['linear', 'rbf', 'poly'],  # Kernel type
-            'gamma': ['scale', 'auto', 0.1, 1],   # Kernel coefficient
-            'degree': [2, 3, 4],                  # Degree for 'poly' kernel
-            'class_weight': [None, 'balanced']    # Class weights
+ 
+
+
+    models = [LinearRegression(), DecisionTreeRegressor(random_state=42), RandomForestRegressor(random_state=42), SVR(), xgb.XGBRegressor()]
+
+    best_model = None
+
+    best_mae = 1
+
+
+    for model in models:
+        _, mae, mse, r2, train_mae, train_mse, train_r2 = train_predict(model, train_data, train_data_labels, test_data, test_data_labels)
+        if mae < best_mae:
+            best_model = model
+            best_mae = mae
+
+
+
+
+
+
+
+    def fine_tune_model(model, train_data, train_data_labels):
+        match(model.__class__.__name__):
+            case "RandomForestRegressor":
+                return RandomForestRegressor(random_state=42)
+            
+
+        parameter_rf = {
+           'n_estimators': [50, 100, 200, 300],      # Number of trees in the forest
+           'max_depth': [None, 10, 20, 30, 50],      # Maximum depth of each tree
+           'min_samples_split': [2, 5, 10],          # Minimum number of samples to split an internal node
+           'min_samples_leaf': [1, 2, 4],            # Minimum number of samples required to be at a leaf node
+           'max_features': ['auto', 'sqrt', 'log2'], # Number of features to consider when looking for the best split
+           'bootstrap': [True, False],               # Whether to use bootstrapping when building trees
+           'random_state': [42],                     # Fixed seed for reproducibility
         }
 
-        parameter_mlp = {
-            'hidden_layer_sizes': [(50,), (100,), (50, 50), (100, 50)],  # Number of neurons in hidden layers
-            'activation': ['relu', 'tanh', 'logistic'],                 # Activation function for hidden layers
-            'solver': ['adam', 'sgd'],                                  # Optimization algorithm
-            'alpha': [0.0001, 0.001, 0.01],                             # L2 regularization term
-            'learning_rate': ['constant', 'adaptive'],                  # Learning rate schedule
-            'learning_rate_init': [0.001, 0.01],                        # Initial learning rate
-            'max_iter': [50],                                # Maximum number of iterations
-            'batch_size': [32, 64, 'auto'],                             # Batch size for training
+        parameter_svr = {
+            'C': [0.1, 1, 10, 100, 1000],              # Regularization parameter
+            'kernel': ['linear', 'poly', 'rbf', 'sigmoid'],  # Type of kernel
+            'epsilon': [0.01, 0.1, 0.5, 1, 1.5],        # Epsilon
+            'gamma': ['scale', 'auto', 0.1, 1, 10],     # Kernel coefficient (relevant for 'rbf', 'poly', and 'sigmoid')
+            'degree': [3, 4, 5]                        # Degree of the polynomial kernel (only for 'poly' kernel)
         }
 
-        parameter_dict = {"MLPClassifier": parameter_mlp, "SVC": parameter_svc}
+        parameter_dict = {"RandomForestRegressor": parameter_rf, "SVR": parameter_svr}
 
-        best_classifier_params = parameter_dict[classifier.__class__.__name__]
+        if parameter_dict[model.__class__.__name__] == None:
+            print("parameters for " + model.__class__.__name__ + "do not exist")
+            exit(1)
+
+        best_model_params = parameter_dict[model.__class__.__name__]
 
 
 
-        f1_scorer = make_scorer(f1_score, pos_label=1)
+        scorer = make_scorer(mean_absolute_error, greater_is_better=False)
 
         grid_obj = GridSearchCV(
-            classifier,
-            scoring=f1_scorer,
-            param_grid=best_classifier_params,
-            cv=5)
+            estimator=model,
+            scoring=scorer,
+            param_grid=best_model_params,
+            cv=5,
+            n_jobs=-1
+        )
         
         
         grid_obj = grid_obj.fit(train_data, train_data_labels)
 
-        classifier = grid_obj.best_estimator_
+        model = grid_obj.best_estimator_
 
-        return classifier
+        return model
+
     
-    def get_best_classifier(classifier_name):
-        match(classifier_name):
-            case "MLPClassifier":
-                return MLPClassifier(batch_size=32, hidden_layer_sizes=(50,), learning_rate_init=0.01,
-                    max_iter=50, random_state=42)
-        return None
+    
+    best_model = fine_tune_model(best_model, train_data, train_data_labels)
 
+    print("The best Model is " + best_model)
 
-    models = [LinearRegression(), DecisionTreeRegressor(random_state=42), RandomForestRegressor(random_state=42), SVR()]
-    #xgboost = xgb.XGBClassifier(seed=82)
+    predictions, _, _, _, _, _, _ = train_predict(best_model, train_data, train_data_labels, test_data, test_data_labels, True)
 
-    best_model = None
-
-
-
-    for model in models:
-        test_predictions, mae, mse, r2, train_mae, train_mse, train_r2 = train_predict(model, train_data, train_data_labels, test_data, test_data_labels, True)
-        '''if (test_f1 > best_f1) or (test_f1 == best_f1 and test_acc > best_acc) or (test_f1 == best_f1 and test_acc == best_acc and train_f1 > best_train_f1) or (test_f1 == best_f1 and test_acc == best_acc and train_f1 == best_train_f1 and train_acc > best_train_acc):
-            best_model = model
-            best_f1 = test_f1
-            best_acc = test_acc
-            best_train_f1 = train_f1
-            best_train_acc = train_acc'''
-
-
-    print("The best Model is " + model.__class__.__name__)
-
+    
     test_data['tmID'] = test_data_tmID
     test_data['winRatio'] = test_data_winRatio
-    test_data['predictions'] = test_predictions
+    test_data['predictedWinRatio'] = predictions
+    test_data['playoff'] = test_data_playoff
+
+    test_data['predictedPlayoff'] = 'N'
+    top_8_teams = test_data.nlargest(8, 'predictedWinRatio').index
+    test_data.loc[top_8_teams, 'predictedPlayoff'] = 'Y'
+
+
 
     print(test_data)
+    print("accuracy: " + str(sum(test_data['playoff'] == test_data['predictedPlayoff']) / 13 * 100.0) + "%")
+    print("f1_score: " + str(f1_score(test_data['playoff'], test_data['predictedPlayoff'], pos_label="Y") * 100.0) + "%")
+
+
+    
+
+
+
+
 
     '''
     #predictions,  _, _ = train_predict(best_classifier, train_data, train_data_labels, test_data, test_data_labels, True)
