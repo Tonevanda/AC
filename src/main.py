@@ -8,7 +8,11 @@ from sklearn.tree import DecisionTreeRegressor
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.svm import SVR
 from sklearn.neural_network import MLPClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+import xgboost as xgb
 from sklearn.model_selection import GridSearchCV
+from sklearn.feature_selection import RFE
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, f1_score, make_scorer
 
 
@@ -147,10 +151,10 @@ def players_per_team_averages(players_per_team, coaches, year, team_info, player
 
     return players_per_team_year
 
-def balance_data(data):
-    most_common_value = data['winRatio'].value_counts().idxmax()
-    minority_class = data[data['winRatio'] != most_common_value]
-    majority_class = data[data['winRatio'] == most_common_value]
+def balance_data(data, label):
+    most_common_value = data[label].value_counts().idxmax()
+    minority_class = data[data[label] != most_common_value]
+    majority_class = data[data[label] == most_common_value]
 
 
 
@@ -192,11 +196,11 @@ def main():
             teams.loc[top_8_teams, 'playoff'] = 'Y'
 
 
-    team_info = ['rank', 'o_fgm', 'o_fga', 'o_ftm', 'o_fta', 'o_3pm', 'o_3pa', 'o_oreb', 'o_dreb', 'o_reb', 'o_asts', 'o_pf', 'o_stl', 'o_to', 'o_blk', 'o_pts', 'd_fgm', 'd_ftm', 'd_fta', 'd_3pm', 'd_3pa', 'd_oreb', 'd_dreb', 'd_reb', 'd_asts', 'd_pf', 'd_stl', 'd_to', 'd_blk', 'd_pts', 'won', 'lost', 'confW', 'confL', 'min', 'attend']
+    team_info = ['rank', 'o_3pa', 'o_asts', 'o_pf', 'o_stl', 'o_to', 'o_blk', 'o_pts', 'd_fgm', 'd_ftm', 'd_fta', 'd_3pm', 'd_3pa', 'd_oreb', 'd_dreb', 'd_reb', 'd_asts', 'd_pf', 'd_stl', 'd_to', 'd_blk', 'd_pts', 'won', 'lost', 'confW', 'confL', 'min', 'attend']
 
 
 
-    player_info = ['points', 'assists', 'steals', 'blocks', 'rebounds', 'GP', 'GS']
+    player_info = ['assists', 'steals', 'rebounds']
 
     coach_info = ['coachWinRatio', 'coachPostWinRatio']
 
@@ -228,176 +232,302 @@ def main():
 
     print('\n\n')
 
-    current_year = 10
-
-    train_data = data[data['year'] < current_year]
-    #train_data = balance_data(train_data)
-    train_data_labels = train_data['winRatio']
-    
-
-    test_data = data[data['year'] == current_year]
-    test_data_labels = test_data['winRatio']
-    
-    train_data = train_data.drop(columns=['winRatio', 'year', 'tmID', 'playoff'])
-    test_data_tmID = test_data['tmID']
-    test_data_winRatio = test_data['winRatio']
-    test_data_playoff = test_data['playoff']
-    test_data = test_data.drop(columns=['year', 'winRatio', 'tmID', 'playoff'])
-    
-
-    total_ints = team_info.copy()
-
-    total_ints.extend(player_info)
+    def train_model(model, x, y):
+        model.fit(x, y)
 
 
-
-
-    scaler = StandardScaler()
-    scaler.fit(train_data[total_ints])
-
-
-    train_data.loc[:, total_ints] = scaler.transform(train_data[total_ints])
-    test_data.loc[:, total_ints] = scaler.transform(test_data[total_ints])
-
-
-
-    
-    def train_model(classifier, x, y):
-        classifier.fit(x, y)
-
-
-    
-    def train_predict(model, x_train, y_train, x_test, y_test, printResults = False):
-        def predict_labels(model, features, labels):
-            predictions = model.predict(features)
-            return predictions, mean_absolute_error(labels, predictions), mean_squared_error(labels, predictions), r2_score(labels, predictions)
+    def predict_win_ratio(current_year, data):
+        train_data = data[data['year'] != current_year]
+        #train_data = balance_data(train_data, 'winRatio')
+        train_data_labels = train_data['winRatio']
         
-        if(printResults):
-            print("Training using " + model.__class__.__name__)
 
-        train_model(model, x_train, y_train)
+        test_data = data[data['year'] == current_year]
+        test_data_labels = test_data['winRatio']
+        
+        train_data = train_data.drop(columns=['winRatio', 'year', 'tmID', 'playoff'])
+        test_data_tmID = test_data['tmID']
+        test_data_winRatio = test_data['winRatio']
+        test_data_playoff = test_data['playoff']
+        test_data = test_data.drop(columns=['year', 'winRatio', 'tmID', 'playoff'])
+        
 
-        _, train_mae, train_mse, train_r2 = predict_labels(model, x_train, y_train)
-        if(printResults):
-            print("Mean Absolute Error for the train set: " + str(train_mae) + '%')
-            print("Mean Squared Error for the train set: " + str(train_mse) + '%')
-            print("R2 Score for the train set: " + str(train_r2) + '%\n')
+        total_ints = team_info.copy()
 
-        predictions, mae, mse, r2 = predict_labels(model, x_test, y_test)
-        if(printResults):
-            print("Mean Absolute Error for the test set: " + str(mae) + '%')
-            print("Mean Squared Error for the test set: " + str(mse) + '%')
-            print("R2 Score for the test set: " + str(r2) + '%\n\n')
-
-        return predictions, mae, mse, r2, train_mae, train_mse, train_r2
-    
- 
+        total_ints.extend(player_info)
 
 
-    models = [LinearRegression(), DecisionTreeRegressor(random_state=42), RandomForestRegressor(random_state=42), SVR(), xgb.XGBRegressor()]
-
-    best_model = None
-
-    best_mae = 1
 
 
-    for model in models:
-        _, mae, mse, r2, train_mae, train_mse, train_r2 = train_predict(model, train_data, train_data_labels, test_data, test_data_labels)
-        if mae < best_mae:
-            best_model = model
-            best_mae = mae
+        scaler = StandardScaler()
+        scaler.fit(train_data[total_ints])
+
+
+        train_data.loc[:, total_ints] = scaler.transform(train_data[total_ints])
+        test_data.loc[:, total_ints] = scaler.transform(test_data[total_ints])
 
 
 
 
 
 
-
-    def fine_tune_model(model, train_data, train_data_labels):
-        match(model.__class__.__name__):
-            case "RandomForestRegressor":
-                return RandomForestRegressor(random_state=42)
-            case "SVR":
-                #return SVR(C=0.1, gamma='auto', kernel='poly')
-                return SVR(C=0.1)
+        
+        def train_predict(model, x_train, y_train, x_test, y_test, printResults = False):
+            def predict_labels(model, features, labels):
+                predictions = model.predict(features)
+                predictions = np.clip(predictions, 0, 1)
+                return predictions, mean_absolute_error(labels, predictions), mean_squared_error(labels, predictions), r2_score(labels, predictions) * 100.0
             
+            if(printResults):
+                print("Training using " + model.__class__.__name__)
 
-        parameter_rf = {
-           'n_estimators': [50, 100, 200, 300],      # Number of trees in the forest
-           'max_depth': [None, 10, 20, 30, 50],      # Maximum depth of each tree
-           'min_samples_split': [2, 5, 10],          # Minimum number of samples to split an internal node
-           'min_samples_leaf': [1, 2, 4],            # Minimum number of samples required to be at a leaf node
-           'max_features': ['auto', 'sqrt', 'log2'], # Number of features to consider when looking for the best split
-           'bootstrap': [True, False],               # Whether to use bootstrapping when building trees
-           'random_state': [42],                     # Fixed seed for reproducibility
-        }
+            train_model(model, x_train, y_train)
 
-        parameter_svr = {
-            'C': [0.1, 1, 10, 100, 1000],              # Regularization parameter
-            'kernel': ['linear', 'poly', 'rbf', 'sigmoid'],  # Type of kernel
-            'epsilon': [0.01, 0.1, 0.5, 1, 1.5],        # Epsilon
-            'gamma': ['scale', 'auto', 0.1, 1, 10],     # Kernel coefficient (relevant for 'rbf', 'poly', and 'sigmoid')
-            'degree': [3, 4, 5]                        # Degree of the polynomial kernel (only for 'poly' kernel)
-        }
+            _, train_mae, train_mse, train_r2 = predict_labels(model, x_train, y_train)
+            if(printResults):
+                print("Mean Absolute Error for the train set: " + str(train_mae))
+                print("Mean Squared Error for the train set: " + str(train_mse))
+                print("R2 Score for the train set: " + str(train_r2) + '%\n')
 
-        parameter_dict = {"RandomForestRegressor": parameter_rf, "SVR": parameter_svr}
+            predictions, mae, mse, r2 = predict_labels(model, x_test, y_test)
+            if(printResults):
+                print("Mean Absolute Error for the test set: " + str(mae))
+                print("Mean Squared Error for the test set: " + str(mse))
+                print("R2 Score for the test set: " + str(r2) + '%\n\n')
 
-        if parameter_dict[model.__class__.__name__] == None:
-            print("parameters for " + model.__class__.__name__ + "do not exist")
-            exit(1)
-
-        best_model_params = parameter_dict[model.__class__.__name__]
+            return predictions, mae, mse, r2, train_mae, train_mse, train_r2
+        
+    
 
 
+        models = [LinearRegression(), DecisionTreeRegressor(random_state=42), RandomForestRegressor(random_state=42), SVR(), xgb.XGBRegressor(), MLPClassifier(random_state=42)]
 
-        scorer = make_scorer(mean_absolute_error, greater_is_better=False)
+        best_model = None
 
-        grid_obj = GridSearchCV(
-            estimator=model,
-            scoring=scorer,
-            param_grid=best_model_params,
-            cv=5,
-            n_jobs=-1
-        )
+        best_r2 = -100
+
+
+        for model in models:
+            _, mae, mse, r2, train_mae, train_mse, train_r2 = train_predict(model, train_data, train_data_labels, test_data, test_data_labels)
+            if r2 > best_r2:
+                best_model = model
+                best_r2 = r2
+
+
+
+
+        def fine_tune_model(model, train_data, train_data_labels):
+            match(model.__class__.__name__):
+                case "RandomForestRegressor":
+                    return RandomForestRegressor(random_state=42)
+                case "SVR":
+                    #return SVR(C=0.1, gamma='auto', kernel='poly')
+                    return SVR(C=0.1, kernel="linear")
+                case "MLPClassifier":
+                    return 
+                
+
+            parameter_rf = {
+            'n_estimators': [50, 100, 200, 300],      # Number of trees in the forest
+            'max_depth': [None, 10, 20, 30, 50],      # Maximum depth of each tree
+            'min_samples_split': [2, 5, 10],          # Minimum number of samples to split an internal node
+            'min_samples_leaf': [1, 2, 4],            # Minimum number of samples required to be at a leaf node
+            'max_features': ['auto', 'sqrt', 'log2'], # Number of features to consider when looking for the best split
+            'bootstrap': [True, False],               # Whether to use bootstrapping when building trees
+            'random_state': [42],                     # Fixed seed for reproducibility
+            }
+
+            parameter_svr = {
+                'C': [0.1, 1, 10, 100, 1000],              # Regularization parameter
+                'kernel': ['linear', 'poly', 'rbf', 'sigmoid'],  # Type of kernel
+                'epsilon': [0.01, 0.1, 0.5, 1, 1.5],        # Epsilon
+                'gamma': ['scale', 'auto', 0.1, 1, 10],     # Kernel coefficient (relevant for 'rbf', 'poly', and 'sigmoid')
+                'degree': [3, 4, 5]                        # Degree of the polynomial kernel (only for 'poly' kernel)
+            }
+
+            parameter_dict = {"RandomForestRegressor": parameter_rf, "SVR": parameter_svr}
+
+            if parameter_dict[model.__class__.__name__] == None:
+                print("parameters for " + model.__class__.__name__ + "do not exist")
+                exit(1)
+
+            best_model_params = parameter_dict[model.__class__.__name__]
+
+
+
+            scorer = make_scorer(mean_absolute_error, greater_is_better=False)
+
+            grid_obj = GridSearchCV(
+                estimator=model,
+                scoring=scorer,
+                param_grid=best_model_params,
+                cv=5,
+                n_jobs=-1
+            )
+            
+            
+            grid_obj = grid_obj.fit(train_data, train_data_labels)
+
+            model = grid_obj.best_estimator_
+
+            return model
+
         
         
-        grid_obj = grid_obj.fit(train_data, train_data_labels)
+        best_model = fine_tune_model(best_model, train_data, train_data_labels)
 
-        model = grid_obj.best_estimator_
+        print("The best Model is " + str(best_model))
 
-        return model
+        predictions, _, _, _, _, _, _ = train_predict(best_model, train_data, train_data_labels, test_data, test_data_labels, True)
+
+        
+        test_data['tmID'] = test_data_tmID
+        test_data['winRatio'] = test_data_winRatio
+        test_data['predictedWinRatio'] = predictions
+        test_data['playoff'] = test_data_playoff
+
+        test_data['predictedPlayoff'] = 'N'
+        top_8_teams = test_data.nlargest(8, 'predictedWinRatio').index
+        test_data.loc[top_8_teams, 'predictedPlayoff'] = 'Y'
+
+
+
+        print(test_data)
+        print("accuracy: " + str(sum(test_data['playoff'] == test_data['predictedPlayoff']) / 13 * 100.0) + "%")
+        print("f1_score: " + str(f1_score(test_data['playoff'], test_data['predictedPlayoff'], pos_label="Y") * 100.0) + "%")
+
+
+    def predict_playoff(current_year, data):
+        train_data = data[data['year'] != current_year]
+        train_data['playoff'] = train_data['playoff'].map({'Y': 1, 'N': 0})
+        train_data = balance_data(train_data, 'playoff')
+        train_data_labels = train_data['playoff']
+        
+
+        test_data = data[data['year'] == current_year]
+        test_data['playoff'] = test_data['playoff'].map({'Y': 1, 'N': 0})
+        test_data_labels = test_data['playoff']
+        
+        train_data = train_data.drop(columns=['winRatio', 'year', 'tmID', 'playoff'])
+        test_data_tmID = test_data['tmID']
+
+        test_data = test_data.drop(columns=['year', 'winRatio', 'tmID', 'playoff'])
+        
+
+        total_ints = team_info.copy()
+
+        total_ints.extend(player_info)
+
+        scaler = StandardScaler()
+        scaler.fit(train_data[total_ints])
+
+
+        train_data.loc[:, total_ints] = scaler.transform(train_data[total_ints])
+        test_data.loc[:, total_ints] = scaler.transform(test_data[total_ints])
+
+
+
+
+        def train_predict(model, x_train, y_train, x_test, y_test, printResults = False):
+            def predict_labels(model, features, labels):
+                predictions = model.predict(features)
+                probabilities = model.predict_proba(features)
+                return predictions, probabilities, f1_score(labels, predictions, pos_label=1) * 100.0, (sum(labels == predictions) / float(len(predictions))) * 100.0
+            
+            if(printResults):
+                print("Training using " + model.__class__.__name__)
+
+
+            train_model(model, x_train, y_train)
+
+            _, _, train_f1, train_acc = predict_labels(model, x_train, y_train)
+            if(printResults):
+                print("F1 score for the train set: " + str(train_f1) + '%')
+                print("Accuracy for the train set: " + str(train_acc) + '%\n')
+
+            predictions, probabilities, f1, acc = predict_labels(model, x_test, y_test)
+            if(printResults):
+                print("F1 score for the test set: " + str(f1) + '%')
+                print("Accuracy for the test set: " + str(acc) + '%\n\n')
+
+            return predictions, probabilities, f1, acc, train_f1, train_acc
+
+
+
+        models = [LogisticRegression(random_state=42), SVC(random_state=912, kernel='linear', probability=True), xgb.XGBClassifier(seed=82), MLPClassifier(random_state=42)]
+
+        best_model = None
+
+        best_f1 = 0
+
+
+        for model in models:
+            _, _, f1, acc, train_f1, train_acc = train_predict(model, train_data, train_data_labels, test_data, test_data_labels)
+            if f1 > best_f1:
+                best_model = model
+                best_f1 = f1
+
+        print("The best model is: " + str(best_model.__class__.__name__))
+
+        def calculate_error(probabilities, test_data_labels):
+            error = []
+            for [_, win_prob] in probabilities:
+                error.append(win_prob*100.0)
+
+            error_sum = test_data_labels[test_data_labels == 1].count()
+            for index in range(0, len(error)):
+                error[index] = abs((error[index] * (error_sum/100.0)/error_sum) - test_data_labels[index])
+
+            error = sum(error)
+            return error
+
+
+        def forward_selection(model, original_train_data, original_test_data, train_data_labels, test_data_labels):
+            best_error = 100
+            best_columns = None
+            for rank_num in range(1, len(original_train_data.columns)):
+                train_data = original_train_data.copy()
+                test_data = original_test_data.copy()
+                rfe = RFE(estimator=model, n_features_to_select=1)
+                fit = rfe.fit(train_data, train_data_labels)
+                new_columns = []
+                index_array = []
+                for index in range(0, len(fit.ranking_)):
+                    if fit.ranking_[index] <= rank_num:
+                        index_array.append(index)
+                for index in range(0, len(train_data.columns)):
+                    if(index in index_array):
+                        new_columns.append(train_data.columns[index])
+                train_data = train_data[new_columns]
+                test_data = test_data[new_columns]
+                _, probabilities, _, _, _, _ = train_predict(best_model, train_data, train_data_labels, test_data, test_data_labels)
+                error = calculate_error(probabilities, test_data_labels)
+                if error < best_error:
+                    best_error = error
+                    best_columns = new_columns
+
+            return original_train_data[best_columns], original_test_data[best_columns]
+
+        train_data, test_data = forward_selection(model, train_data, test_data, train_data_labels, test_data_labels)
+        print(test_data.columns)
+        predictions, probabilities, _, _, _, _ = train_predict(best_model, train_data, train_data_labels, test_data, test_data_labels, True)
 
     
-    
-    best_model = fine_tune_model(best_model, train_data, train_data_labels)
 
-    print("The best Model is " + str(best_model))
+        test_data['tmID'] = test_data_tmID
+        test_data['playoff'] = test_data_labels.map({1: "Y", 0: "N"})
+        test_data['predictedPlayoff'] = predictions
+        test_data['predictedPlayoff'] = test_data['predictedPlayoff'].map({1: "Y", 0: "N"})
 
-    predictions, _, _, _, _, _, _ = train_predict(best_model, train_data, train_data_labels, test_data, test_data_labels, True)
 
-    
-    test_data['tmID'] = test_data_tmID
-    test_data['winRatio'] = test_data_winRatio
-    test_data['predictedWinRatio'] = predictions
-    test_data['playoff'] = test_data_playoff
+        print(test_data)
 
-    test_data['predictedPlayoff'] = 'N'
-    top_8_teams = test_data.nlargest(8, 'predictedWinRatio').index
-    test_data.loc[top_8_teams, 'predictedPlayoff'] = 'Y'
+        print("The error is: " + str(calculate_error(probabilities, test_data_labels)))
 
 
 
-    print(test_data)
-    print("accuracy: " + str(sum(test_data['playoff'] == test_data['predictedPlayoff']) / 13 * 100.0) + "%")
-    print("f1_score: " + str(f1_score(test_data['playoff'], test_data['predictedPlayoff'], pos_label="Y") * 100.0) + "%")
-
-
-    
-
-
-
-
-
+    current_year = 10
+    predict_playoff(current_year, data) 
 
 
     #for player_sta
