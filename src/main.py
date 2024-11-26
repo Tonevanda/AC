@@ -317,6 +317,9 @@ def main():
         match(model.__class__.__name__):
             case "RandomForestRegressor":
                 return RandomForestRegressor(random_state=42)
+            case "SVR":
+                #return SVR(C=0.1, gamma='auto', kernel='poly')
+                return SVR(C=0.1)
             
 
         parameter_rf = {
@@ -368,7 +371,7 @@ def main():
     
     best_model = fine_tune_model(best_model, train_data, train_data_labels)
 
-    print("The best Model is " + best_model)
+    print("The best Model is " + str(best_model))
 
     predictions, _, _, _, _, _, _ = train_predict(best_model, train_data, train_data_labels, test_data, test_data_labels, True)
 
@@ -394,36 +397,6 @@ def main():
 
 
 
-
-    '''
-    #predictions,  _, _ = train_predict(best_classifier, train_data, train_data_labels, test_data, test_data_labels, True)
-
-    #probabilities, predictions, _, _, _, = train_predict(best_classifier, train_data, train_data_labels, test_data, test_data_labels, train_year, train_tmID, test_year, test_tmID, True)
-
-
-    #print(fine_tune_classifier(best_classifier, train_data, train_data_labels, train_year, train_tmID))
-    #best_classifier = get_best_classifier(best_classifier.__class__.__name__)
-
-    if best_classifier == None:
-        print("Best classifier is not available")
-        return
-    
-    probabilities, predictions, _, _, _ = train_predict(best_classifier, train_data, train_data_labels, test_data, test_data_labels, train_year, train_tmID, test_year, test_tmID, True)
-
-
-
-
-    predictions_probs = []
-
-    for [_, win_prob] in probabilities:
-        predictions_probs.append(win_prob)
-
-
-    test_data['tmID'] = test_tmID
-    test_data['hasWon'] = predictions
-    test_data['probs'] = predictions_probs
-
-    print(test_data)'''
 
 
 
