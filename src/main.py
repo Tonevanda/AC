@@ -189,10 +189,19 @@ def profile_plot(data):
     # Convert 'playoff' column to string type
     
     plot_data.drop(columns=['tmID',"playoff"], inplace=True)
-    scaler =  MinMaxScaler()
+    # Normalize the column values
+    scaler = MinMaxScaler()
     plot_data[plot_data.columns] = scaler.fit_transform(plot_data[plot_data.columns])
-    plot_data["playoff"] = data["playoff"]
-    plot_data.to_csv("data_normalized.csv", index=False)
+    
+    # Add 'playoff' column back
+    plot_data['playoff'] = data['playoff']
+    
+    # Group by 'playoff' and calculate the mean for each group
+    plot_data_grouped = plot_data.groupby('playoff').mean().reset_index()
+    
+    # Save normalized data to CSV
+    plot_data_grouped.to_csv("data_normalized2.csv", index=False)
+    
     # Plotting the parallel coordinates plot
     """plt.figure(figsize=(20, 12))
     pd.plotting.parallel_coordinates(plot_data, 'playoff', color=('#556270', '#4ECDC4'))
@@ -250,7 +259,7 @@ def main():
     data.to_csv("data.csv", index=False)
 
     print('\n\n')
-    
+    profile_plot(data);
     
 
     def train_model(model, x, y):
@@ -557,7 +566,7 @@ def main():
     predict_playoff(current_year, data) 
 
 
-    #for player_sta"""
+    #for player_sta
 
 if __name__ == "__main__":
     main()
