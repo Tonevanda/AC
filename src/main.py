@@ -14,6 +14,7 @@ from sklearn.svm import SVC
 import xgboost as xgb
 from sklearn.model_selection import GridSearchCV
 from sklearn.feature_selection import RFE
+from sklearn.inspection import permutation_importance
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, f1_score, make_scorer
 
 
@@ -479,16 +480,7 @@ def main():
 
         best_model = None
 
-        best_f1 = 0
-
-
-        for model in models:
-            _, _, f1, acc, train_f1, train_acc = train_predict(model, train_data, train_data_labels, test_data, test_data_labels)
-            if f1 > best_f1:
-                best_model = model
-                best_f1 = f1
-
-        print("The best model is: " + str(best_model.__class__.__name__))
+        best_error = 100
 
         def calculate_error(probabilities, test_data_labels):
             error = []
@@ -502,14 +494,25 @@ def main():
             error = sum(error)
             return error
 
+        for model in models:
+            _, probabilities, f1, acc, train_f1, train_acc = train_predict(model, train_data, train_data_labels, test_data, test_data_labels)
+            error = calculate_error(probabilities, test_data_labels)
+            if error < best_error:
+                best_model = model
+                best_error = error
 
+        print("The best model is: " + str(best_model.__class__.__name__))
+
+        #return train data and test data with best features to use and also returns the error per number of feature use 
         def forward_selection(model, original_train_data, original_test_data, train_data_labels, test_data_labels):
+            rfe_model = LogisticRegression(random_state=42)
             best_error = 100
             best_columns = None
+            error_per_features = []
             for rank_num in range(1, len(original_train_data.columns)):
                 train_data = original_train_data.copy()
                 test_data = original_test_data.copy()
-                rfe = RFE(estimator=model, n_features_to_select=1)
+                rfe = RFE(estimator=rfe_model, n_features_to_select=1)
                 fit = rfe.fit(train_data, train_data_labels)
                 new_columns = []
                 index_array = []
@@ -521,17 +524,18 @@ def main():
                         new_columns.append(train_data.columns[index])
                 train_data = train_data[new_columns]
                 test_data = test_data[new_columns]
-                _, probabilities, _, _, _, _ = train_predict(best_model, train_data, train_data_labels, test_data, test_data_labels)
+                _, probabilities, _, _, _, _ = train_predict(model, train_data, train_data_labels, test_data, test_data_labels)
                 error = calculate_error(probabilities, test_data_labels)
+                error_per_features.append((error, len(new_columns)))
                 if error < best_error:
                     best_error = error
                     best_columns = new_columns
 
-            return original_train_data[best_columns], original_test_data[best_columns]
+            return original_train_data[best_columns], original_test_data[best_columns], error_per_features
 
-        train_data, test_data = forward_selection(model, train_data, test_data, train_data_labels, test_data_labels)
+        train_data, test_data, _ = forward_selection(model, train_data, test_data, train_data_labels, test_data_labels)
         print(test_data.columns)
-        predictions, probabilities, _, _, _, _ = train_predict(best_model, train_data, train_data_labels, test_data, test_data_labels, True)
+        predictions, probabilities, _, _, _, _ = train_predict(model, train_data, train_data_labels, test_data, test_data_labels, True)
 
     
 
@@ -544,6 +548,8 @@ def main():
         print(test_data)
 
         print("The error is: " + str(calculate_error(probabilities, test_data_labels)))
+
+        return best_model
 
 
 
