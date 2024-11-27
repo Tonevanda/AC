@@ -1,7 +1,8 @@
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 from sklearn.utils import resample
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 import xgboost as xgb
 from sklearn.linear_model import LinearRegression
 from sklearn.tree import DecisionTreeRegressor
@@ -182,19 +183,36 @@ def rename_attributes(data, player_info):
     # Rename the columns to Best Player (BP)
     return data.rename(columns=columns)
     
+def profile_plot(data):
+    plot_data = data.copy()
+    # Convert 'playoff' column to string type
+    
+    plot_data.drop(columns=['tmID',"playoff"], inplace=True)
+    scaler =  MinMaxScaler()
+    plot_data[plot_data.columns] = scaler.fit_transform(plot_data[plot_data.columns])
+    plot_data["playoff"] = data["playoff"]
+    plot_data.to_csv("data_normalized.csv", index=False)
+    # Plotting the parallel coordinates plot
+    """plt.figure(figsize=(20, 12))
+    pd.plotting.parallel_coordinates(plot_data, 'playoff', color=('#556270', '#4ECDC4'))
+    plt.title('Profile Plot of Team Data')
+    plt.xlabel('Attributes')
+    plt.ylabel('Values')
+    plt.show()"""
 
 def main():
     pd.set_option('display.max_rows', None)
     awards_players, coaches, players_teams, players, teams_post, teams, series_post = loadData()
 
     teams['winRatio'] = teams['won'] / (teams['won'] + teams['lost'])
-    teams['playoff'] = 'N'
+
+    """teams['playoff'] = 'N'
     for year in range(1, 12):
         teams_in_year = teams[teams['year'] == year]
         if not teams_in_year.empty:
             top_8_teams = teams_in_year.nlargest(8, 'winRatio').index
             teams.loc[top_8_teams, 'playoff'] = 'Y'
-
+    """
 
     team_info = ['rank', 'o_3pa', 'o_asts', 'o_pf', 'o_stl', 'o_to', 'o_blk', 'o_pts', 'd_fgm', 'd_ftm', 'd_fta', 'd_3pm', 'd_3pa', 'd_oreb', 'd_dreb', 'd_reb', 'd_asts', 'd_pf', 'd_stl', 'd_to', 'd_blk', 'd_pts', 'won', 'lost', 'confW', 'confL', 'min', 'attend']
 
@@ -231,6 +249,8 @@ def main():
     data.to_csv("data.csv", index=False)
 
     print('\n\n')
+    
+    
 
     def train_model(model, x, y):
         model.fit(x, y)
@@ -396,7 +416,8 @@ def main():
         print("accuracy: " + str(sum(test_data['playoff'] == test_data['predictedPlayoff']) / 13 * 100.0) + "%")
         print("f1_score: " + str(f1_score(test_data['playoff'], test_data['predictedPlayoff'], pos_label="Y") * 100.0) + "%")
 
-
+    
+    
     def predict_playoff(current_year, data):
         train_data = data[data['year'] != current_year]
         train_data['playoff'] = train_data['playoff'].map({'Y': 1, 'N': 0})
@@ -452,7 +473,7 @@ def main():
 
             return predictions, probabilities, f1, acc, train_f1, train_acc
 
-
+    
 
         models = [LogisticRegression(random_state=42), SVC(random_state=912, kernel='linear', probability=True), xgb.XGBClassifier(seed=82), MLPClassifier(random_state=42)]
 
@@ -530,7 +551,7 @@ def main():
     predict_playoff(current_year, data) 
 
 
-    #for player_sta
+    #for player_sta"""
 
 if __name__ == "__main__":
     main()
