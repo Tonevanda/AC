@@ -6,6 +6,7 @@ import xgboost as xgb
 from sklearn.linear_model import LinearRegression
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.neural_network import MLPRegressor
 from sklearn.svm import SVR
 from sklearn.neural_network import MLPClassifier
 from sklearn.linear_model import LogisticRegression
@@ -14,7 +15,7 @@ import xgboost as xgb
 from sklearn.model_selection import GridSearchCV
 from sklearn.feature_selection import RFE
 from sklearn.inspection import permutation_importance
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, f1_score, make_scorer
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, f1_score, make_scorer, roc_curve, auc
 
 
 def loadData():
@@ -184,8 +185,8 @@ def rename_attributes(data, player_info):
     return data.rename(columns=columns)
     
 
-def main():
-    pd.set_option('display.max_rows', None)
+
+def getData():
     awards_players, coaches, players_teams, players, teams_post, teams, series_post = loadData()
 
     teams['winRatio'] = teams['won'] / (teams['won'] + teams['lost'])
@@ -231,312 +232,347 @@ def main():
     
     data.to_csv("data.csv", index=False)
 
-    print('\n\n')
+    total_ints = team_info.copy()
 
-    def train_model(model, x, y):
-        model.fit(x, y)
+    total_ints.extend(player_info)
+    total_ints.extend(coach_info)
 
-
-    def predict_win_ratio(current_year, data):
-        train_data = data[data['year'] != current_year]
-        #train_data = balance_data(train_data, 'winRatio')
-        train_data_labels = train_data['winRatio']
-        
-
-        test_data = data[data['year'] == current_year]
-        test_data_labels = test_data['winRatio']
-        
-        train_data = train_data.drop(columns=['winRatio', 'year', 'tmID', 'playoff'])
-        test_data_tmID = test_data['tmID']
-        test_data_winRatio = test_data['winRatio']
-        test_data_playoff = test_data['playoff']
-        test_data = test_data.drop(columns=['year', 'winRatio', 'tmID', 'playoff'])
-        
-
-        total_ints = team_info.copy()
-
-        total_ints.extend(player_info)
+    return data, total_ints
 
 
+def preprocess(data, total_ints, current_year, label, balanceData = False):
+    train_data = data[data['year'] < current_year]
+    if label == "playoff":
+        train_data[label] = train_data[label].map({'Y': 1, 'N': 0})
+    if balanceData:
+        train_data = balance_data(train_data, label)
 
+    train_data_labels = train_data[label]
+    
 
-        scaler = StandardScaler()
-        scaler.fit(train_data[total_ints])
+    test_data = data[data['year'] == current_year]
+    if label == "playoff":
+        test_data[label] = test_data[label].map({'Y': 1, 'N': 0})
+    test_data_labels = test_data[label]
+    
+    train_data = train_data.drop(columns=['winRatio', 'year', 'tmID', 'playoff'])
+    test_data_tmID = test_data['tmID']
+    test_data_playoff = test_data['playoff']
 
-
-        train_data.loc[:, total_ints] = scaler.transform(train_data[total_ints])
-        test_data.loc[:, total_ints] = scaler.transform(test_data[total_ints])
-
-
-
-
-
-
-        
-        def train_predict(model, x_train, y_train, x_test, y_test, printResults = False):
-            def predict_labels(model, features, labels):
-                predictions = model.predict(features)
-                predictions = np.clip(predictions, 0, 1)
-                return predictions, mean_absolute_error(labels, predictions), mean_squared_error(labels, predictions), r2_score(labels, predictions) * 100.0
-            
-            if(printResults):
-                print("Training using " + model.__class__.__name__)
-
-            train_model(model, x_train, y_train)
-
-            _, train_mae, train_mse, train_r2 = predict_labels(model, x_train, y_train)
-            if(printResults):
-                print("Mean Absolute Error for the train set: " + str(train_mae))
-                print("Mean Squared Error for the train set: " + str(train_mse))
-                print("R2 Score for the train set: " + str(train_r2) + '%\n')
-
-            predictions, mae, mse, r2 = predict_labels(model, x_test, y_test)
-            if(printResults):
-                print("Mean Absolute Error for the test set: " + str(mae))
-                print("Mean Squared Error for the test set: " + str(mse))
-                print("R2 Score for the test set: " + str(r2) + '%\n\n')
-
-            return predictions, mae, mse, r2, train_mae, train_mse, train_r2
-        
+    test_data = test_data.drop(columns=['year', 'winRatio', 'tmID', 'playoff'])
     
 
 
-        models = [LinearRegression(), DecisionTreeRegressor(random_state=42), RandomForestRegressor(random_state=42), SVR(), xgb.XGBRegressor(), MLPClassifier(random_state=42)]
-
-        best_model = None
-
-        best_r2 = -100
+    scaler = StandardScaler()
+    scaler.fit(train_data[total_ints])
 
 
-        for model in models:
-            _, mae, mse, r2, train_mae, train_mse, train_r2 = train_predict(model, train_data, train_data_labels, test_data, test_data_labels)
-            if r2 > best_r2:
-                best_model = model
-                best_r2 = r2
+    train_data.loc[:, total_ints] = scaler.transform(train_data[total_ints])
+    test_data.loc[:, total_ints] = scaler.transform(test_data[total_ints])
 
+    return train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff
 
+def calculate_error(probabilities, test_data_labels):
+    error = []
+    for [_, win_prob] in probabilities:
+        error.append(win_prob*100.0)
 
+    error_sum = test_data_labels[test_data_labels == 1].count()
+    for index in range(0, len(error)):
+        error[index] = abs((error[index] * (error_sum/100.0)/error_sum) - test_data_labels[index])
 
-        def fine_tune_model(model, train_data, train_data_labels):
-            match(model.__class__.__name__):
-                case "RandomForestRegressor":
-                    return RandomForestRegressor(random_state=42)
-                case "SVR":
-                    #return SVR(C=0.1, gamma='auto', kernel='poly')
-                    return SVR(C=0.1, kernel="linear")
-                case "MLPClassifier":
-                    return 
-                
+    error = sum(error)
+    return error
 
-            parameter_rf = {
-            'n_estimators': [50, 100, 200, 300],      # Number of trees in the forest
-            'max_depth': [None, 10, 20, 30, 50],      # Maximum depth of each tree
-            'min_samples_split': [2, 5, 10],          # Minimum number of samples to split an internal node
-            'min_samples_leaf': [1, 2, 4],            # Minimum number of samples required to be at a leaf node
-            'max_features': ['auto', 'sqrt', 'log2'], # Number of features to consider when looking for the best split
-            'bootstrap': [True, False],               # Whether to use bootstrapping when building trees
-            'random_state': [42],                     # Fixed seed for reproducibility
-            }
+def train_model(model, x, y):
+    model.fit(x, y)
 
-            parameter_svr = {
-                'C': [0.1, 1, 10, 100, 1000],              # Regularization parameter
-                'kernel': ['linear', 'poly', 'rbf', 'sigmoid'],  # Type of kernel
-                'epsilon': [0.01, 0.1, 0.5, 1, 1.5],        # Epsilon
-                'gamma': ['scale', 'auto', 0.1, 1, 10],     # Kernel coefficient (relevant for 'rbf', 'poly', and 'sigmoid')
-                'degree': [3, 4, 5]                        # Degree of the polynomial kernel (only for 'poly' kernel)
-            }
-
-            parameter_dict = {"RandomForestRegressor": parameter_rf, "SVR": parameter_svr}
-
-            if parameter_dict[model.__class__.__name__] == None:
-                print("parameters for " + model.__class__.__name__ + "do not exist")
-                exit(1)
-
-            best_model_params = parameter_dict[model.__class__.__name__]
-
-
-
-            scorer = make_scorer(mean_absolute_error, greater_is_better=False)
-
-            grid_obj = GridSearchCV(
-                estimator=model,
-                scoring=scorer,
-                param_grid=best_model_params,
-                cv=5,
-                n_jobs=-1
-            )
-            
-            
-            grid_obj = grid_obj.fit(train_data, train_data_labels)
-
-            model = grid_obj.best_estimator_
-
-            return model
-
-        
-        
-        best_model = fine_tune_model(best_model, train_data, train_data_labels)
-
-        print("The best Model is " + str(best_model))
-
-        predictions, _, _, _, _, _, _ = train_predict(best_model, train_data, train_data_labels, test_data, test_data_labels, True)
-
-        
-        test_data['tmID'] = test_data_tmID
-        test_data['winRatio'] = test_data_winRatio
-        test_data['predictedWinRatio'] = predictions
-        test_data['playoff'] = test_data_playoff
-
-        test_data['predictedPlayoff'] = 'N'
-        top_8_teams = test_data.nlargest(8, 'predictedWinRatio').index
-        test_data.loc[top_8_teams, 'predictedPlayoff'] = 'Y'
-
-
-
-        print(test_data)
-        print("accuracy: " + str(sum(test_data['playoff'] == test_data['predictedPlayoff']) / 13 * 100.0) + "%")
-        print("f1_score: " + str(f1_score(test_data['playoff'], test_data['predictedPlayoff'], pos_label="Y") * 100.0) + "%")
-
-
-    def predict_playoff(current_year, data):
-        train_data = data[data['year'] != current_year]
-        train_data['playoff'] = train_data['playoff'].map({'Y': 1, 'N': 0})
-        train_data = balance_data(train_data, 'playoff')
-        train_data_labels = train_data['playoff']
-        
-
-        test_data = data[data['year'] == current_year]
-        test_data['playoff'] = test_data['playoff'].map({'Y': 1, 'N': 0})
-        test_data_labels = test_data['playoff']
-        
-        train_data = train_data.drop(columns=['winRatio', 'year', 'tmID', 'playoff'])
-        test_data_tmID = test_data['tmID']
-
-        test_data = test_data.drop(columns=['year', 'winRatio', 'tmID', 'playoff'])
-        
-
-        total_ints = team_info.copy()
-
-        total_ints.extend(player_info)
-
-        scaler = StandardScaler()
-        scaler.fit(train_data[total_ints])
-
-
-        train_data.loc[:, total_ints] = scaler.transform(train_data[total_ints])
-        test_data.loc[:, total_ints] = scaler.transform(test_data[total_ints])
-
-
-
-
-        def train_predict(model, x_train, y_train, x_test, y_test, printResults = False):
-            def predict_labels(model, features, labels):
-                predictions = model.predict(features)
-                probabilities = model.predict_proba(features)
-                return predictions, probabilities, f1_score(labels, predictions, pos_label=1) * 100.0, (sum(labels == predictions) / float(len(predictions))) * 100.0
-            
-            if(printResults):
-                print("Training using " + model.__class__.__name__)
-
-
-            train_model(model, x_train, y_train)
-
-            _, _, train_f1, train_acc = predict_labels(model, x_train, y_train)
-            if(printResults):
-                print("F1 score for the train set: " + str(train_f1) + '%')
-                print("Accuracy for the train set: " + str(train_acc) + '%\n')
-
-            predictions, probabilities, f1, acc = predict_labels(model, x_test, y_test)
-            if(printResults):
-                print("F1 score for the test set: " + str(f1) + '%')
-                print("Accuracy for the test set: " + str(acc) + '%\n\n')
-
-            return predictions, probabilities, f1, acc, train_f1, train_acc
-
-
-
-        models = [LogisticRegression(random_state=42), SVC(random_state=912, kernel='linear', probability=True), xgb.XGBClassifier(seed=82), MLPClassifier(random_state=42)]
-
-        best_model = None
-
-        best_error = 100
-
-        def calculate_error(probabilities, test_data_labels):
-            error = []
-            for [_, win_prob] in probabilities:
-                error.append(win_prob*100.0)
-
-            error_sum = test_data_labels[test_data_labels == 1].count()
-            for index in range(0, len(error)):
-                error[index] = abs((error[index] * (error_sum/100.0)/error_sum) - test_data_labels[index])
-
-            error = sum(error)
-            return error
-
-        for model in models:
-            _, probabilities, f1, acc, train_f1, train_acc = train_predict(model, train_data, train_data_labels, test_data, test_data_labels)
-            error = calculate_error(probabilities, test_data_labels)
-            if error < best_error:
-                best_model = model
-                best_error = error
-
-        print("The best model is: " + str(best_model.__class__.__name__))
-
-        #return train data and test data with best features to use and also returns the error per number of feature use 
-        def forward_selection(model, original_train_data, original_test_data, train_data_labels, test_data_labels):
-            rfe_model = LogisticRegression(random_state=42)
-            best_error = 100
-            best_columns = None
-            error_per_features = []
-            for rank_num in range(1, len(original_train_data.columns)):
-                train_data = original_train_data.copy()
-                test_data = original_test_data.copy()
-                rfe = RFE(estimator=rfe_model, n_features_to_select=1)
-                fit = rfe.fit(train_data, train_data_labels)
-                new_columns = []
-                index_array = []
-                for index in range(0, len(fit.ranking_)):
-                    if fit.ranking_[index] <= rank_num:
-                        index_array.append(index)
-                for index in range(0, len(train_data.columns)):
-                    if(index in index_array):
-                        new_columns.append(train_data.columns[index])
-                train_data = train_data[new_columns]
-                test_data = test_data[new_columns]
-                _, probabilities, _, _, _, _ = train_predict(model, train_data, train_data_labels, test_data, test_data_labels)
-                error = calculate_error(probabilities, test_data_labels)
-                error_per_features.append((error, len(new_columns)))
-                if error < best_error:
-                    best_error = error
-                    best_columns = new_columns
-
-            return original_train_data[best_columns], original_test_data[best_columns], error_per_features
-
-        train_data, test_data, _ = forward_selection(model, train_data, test_data, train_data_labels, test_data_labels)
-        print(test_data.columns)
-        predictions, probabilities, _, _, _, _ = train_predict(model, train_data, train_data_labels, test_data, test_data_labels, True)
-
+def train_predict_regression(model, x_train, y_train, x_test, y_test):
+    def predict_labels(model, features):
+        predictions = model.predict(features)
+        predictions = np.clip(predictions, 0, 1)
+        return predictions
     
 
-        test_data['tmID'] = test_data_tmID
-        test_data['playoff'] = test_data_labels.map({1: "Y", 0: "N"})
-        test_data['predictedPlayoff'] = predictions
-        test_data['predictedPlayoff'] = test_data['predictedPlayoff'].map({1: "Y", 0: "N"})
+    train_model(model, x_train, y_train)
+
+    train_predictions = predict_labels(model, x_train)
 
 
-        print(test_data)
+    predictions = predict_labels(model, x_test)
 
-        print("The error is: " + str(calculate_error(probabilities, test_data_labels)))
+    return predictions, train_predictions
 
-        return best_model
+def train_predict_classifier(model, x_train, y_train, x_test, y_test):
+    def predict_labels(model, features):
+        predictions = model.predict(features)
+        probabilities = model.predict_proba(features)
+        return predictions, probabilities
+
+    train_model(model, x_train, y_train)
+
+    train_predictions, train_probabilities, = predict_labels(model, x_train)
+
+    predictions, probabilities = predict_labels(model, x_test)
+
+    return predictions, probabilities, train_predictions, train_probabilities
+
+def evaluate_model(metric, labels, prediction, probability = None):
+    if metric == "f1":
+        return f1_score(labels, prediction, pos_label=1) * 100.0
+    elif metric == "acc":
+        return (sum(labels == prediction) / len(prediction)) * 100.0
+    elif metric == "auc":
+        fpr, tpr, _ = roc_curve(labels, probability[:, 1])
+        return auc(fpr, tpr) * 100.0
+    elif metric == "error":
+        return calculate_error(probability, labels)
+    elif metric == "mae":
+        return mean_absolute_error(labels, prediction)
+    elif metric == "mse":
+        return mean_squared_error(labels, prediction)
+    elif metric == "r2":
+        return r2_score(labels, prediction) * 100.0
+
+
+def forward_selection(model, original_train_data, original_test_data, train_data_labels, test_data_labels, problem_type, metric):
+    rfe_model = None
+    if problem_type == "Classification":
+        rfe_model = LogisticRegression(random_state=42)
+    elif problem_type == "Regression":
+        rfe_model = LinearRegression()
+    best_stat = 0
+    if metric == "error" or metric == "mae":
+        best_stat = 100
+    best_columns = None
+    metric_per_features = []
+    for rank_num in range(1, len(original_train_data.columns)):
+        train_data = original_train_data.copy()
+        test_data = original_test_data.copy()
+        rfe = RFE(estimator=rfe_model, n_features_to_select=1)
+        fit = rfe.fit(train_data, train_data_labels)
+        new_columns = []
+        index_array = []
+        for index in range(0, len(fit.ranking_)):
+            if fit.ranking_[index] <= rank_num:
+                index_array.append(index)
+        for index in range(0, len(train_data.columns)):
+            if(index in index_array):
+                new_columns.append(train_data.columns[index])
+        train_data = train_data[new_columns]
+        test_data = test_data[new_columns]
+        stat = None
+        if problem_type == "Classification":
+            predictions, probabilities, _, _ = train_predict_classifier(model, train_data, train_data_labels, test_data, test_data_labels)
+            stat = evaluate_model(metric, test_data_labels, predictions, probabilities)
+        elif problem_type == "Regression":
+            predictions, _ = train_predict_regression(model, train_data, train_data_labels, test_data, test_data_labels)
+            stat = evaluate_model(metric, test_data_labels, predictions)
+        
+        metric_per_features.append((stat, len(new_columns)))
+        if (metric == "error" or metric == "mae") and stat < best_stat:
+            best_stat = stat
+            best_columns = new_columns
+        elif metric != "error" and metric != "mae" and stat > best_stat:
+            best_stat = stat
+            best_columns = new_columns
+
+    return original_train_data[best_columns], original_test_data[best_columns], metric_per_features
+
+def getModels(problem_type):
+    if problem_type == "Regression":
+        return [LinearRegression(), DecisionTreeRegressor(random_state=42), RandomForestRegressor(random_state=42), SVR(), xgb.XGBRegressor(), MLPRegressor(random_state=42)]
+    elif problem_type == "Classification":
+        return [LogisticRegression(random_state=42), SVC(random_state=912, kernel='linear', probability=True), xgb.XGBClassifier(seed=82), MLPClassifier(random_state=42)]
+
+def getBestModel(models, train_data, train_data_labels, test_data, test_data_labels, problem_type, metric = "error"):
+    best_model = None
+
+    best_stat = 0
+
+    if metric == "mae" or metric == "error":
+        best_stat = 100
+
+
+    for model in models:
+        stat = None
+        if problem_type == "Classification":
+            predictions, probabilities, _, _ = train_predict_classifier(model, train_data, train_data_labels, test_data, test_data_labels)
+            stat = evaluate_model(metric, test_data_labels, predictions, probabilities)
+        elif problem_type == "Regression":
+            predictions, _ = train_predict_regression(model, train_data, train_data_labels, test_data, test_data_labels)
+            stat = evaluate_model(metric, test_data_labels, predictions)
+
+        if (metric == "mae" or metric == "error") and stat < best_stat:
+            best_stat = stat
+            best_model = model
+        elif metric != "mae" and metric != "error" and stat > best_stat:
+            best_stat = stat
+            best_model = model
+
+    return best_model
+
+def predict_win_ratio(model, train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, metrics):
+
+
+    def fine_tune_model(model, train_data, train_data_labels):
+        match(model.__class__.__name__):
+            case "RandomForestRegressor":
+                return RandomForestRegressor(random_state=42)
+            case "SVR":
+                #return SVR(C=0.1, gamma='auto', kernel='poly')
+                return SVR(C=0.1, kernel="linear")
+            case "MLPClassifier":
+                return 
+            
+
+        parameter_rf = {
+        'n_estimators': [50, 100, 200, 300],      # Number of trees in the forest
+        'max_depth': [None, 10, 20, 30, 50],      # Maximum depth of each tree
+        'min_samples_split': [2, 5, 10],          # Minimum number of samples to split an internal node
+        'min_samples_leaf': [1, 2, 4],            # Minimum number of samples required to be at a leaf node
+        'max_features': ['auto', 'sqrt', 'log2'], # Number of features to consider when looking for the best split
+        'bootstrap': [True, False],               # Whether to use bootstrapping when building trees
+        'random_state': [42],                     # Fixed seed for reproducibility
+        }
+
+        parameter_svr = {
+            'C': [0.1, 1, 10, 100, 1000],              # Regularization parameter
+            'kernel': ['linear', 'poly', 'rbf', 'sigmoid'],  # Type of kernel
+            'epsilon': [0.01, 0.1, 0.5, 1, 1.5],        # Epsilon
+            'gamma': ['scale', 'auto', 0.1, 1, 10],     # Kernel coefficient (relevant for 'rbf', 'poly', and 'sigmoid')
+            'degree': [3, 4, 5]                        # Degree of the polynomial kernel (only for 'poly' kernel)
+        }
+
+        parameter_dict = {"RandomForestRegressor": parameter_rf, "SVR": parameter_svr}
+
+        if parameter_dict[model.__class__.__name__] == None:
+            print("parameters for " + model.__class__.__name__ + "do not exist")
+            exit(1)
+
+        best_model_params = parameter_dict[model.__class__.__name__]
 
 
 
-    current_year = 10
-    predict_playoff(current_year, data) 
+        scorer = make_scorer(mean_absolute_error, greater_is_better=False)
+
+        grid_obj = GridSearchCV(
+            estimator=model,
+            scoring=scorer,
+            param_grid=best_model_params,
+            cv=5,
+            n_jobs=-1
+        )
+        
+        
+        grid_obj = grid_obj.fit(train_data, train_data_labels)
+
+        model = grid_obj.best_estimator_
+
+        return model
+
+    
+    
+    #best_model = fine_tune_model(best_model, train_data, train_data_labels)
 
 
-    #for player_sta
+    predictions, _ = train_predict_regression(model, train_data, train_data_labels, test_data, test_data_labels)
+
+    
+    test_data['tmID'] = test_data_tmID
+    test_data['winRatio'] = test_data_labels
+    test_data['predictedWinRatio'] = predictions
+    test_data['playoff'] = test_data_playoff
+
+    test_data['predictedPlayoff'] = 'N'
+    top_8_teams = test_data.nlargest(8, 'predictedWinRatio').index
+    test_data.loc[top_8_teams, 'predictedPlayoff'] = 'Y'
+
+    test_data = test_data[['tmID', 'winRatio', 'predictedWinRatio', 'playoff', 'predictedPlayoff']]
+    print("The " + model.__class__.__name__ + " Predicted:")
+    print(test_data)
+    for metric in metrics:
+        labels = test_data_labels
+        pred = predictions
+        if metric == "acc" or metric == "f1":
+            labels = test_data_playoff.map({"Y": 1, "N": 0})
+            pred = test_data['predictedPlayoff'].map({"Y": 1, "N": 0})
+        stat = str(evaluate_model(metric, labels, pred))
+
+
+        print("The " + metric + " is: " + stat)
+
+
+
+def predict_playoff(model, train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, metrics):
+
+    
+    predictions, probabilities, _, _, = train_predict_classifier(model, train_data, train_data_labels, test_data, test_data_labels)
+
+    probabilities_per_team = []
+    final_playoff = []
+    for [_, win_prob] in probabilities:
+        probabilities_per_team.append(win_prob)
+        final_playoff.append('N')
+
+    test_data['tmID'] = test_data_tmID
+    test_data['playoff'] = test_data_labels.map({1: "Y", 0: "N"})
+    test_data['predictedPlayoff'] = predictions
+    test_data['predictedPlayoff'] = test_data['predictedPlayoff'].map({1: "Y", 0: "N"})
+    test_data['finalPlayoff'] = final_playoff
+    test_data['probabilities'] = probabilities_per_team
+
+    top_8_teams = test_data.nlargest(8, 'probabilities').index
+    test_data.loc[top_8_teams, 'finalPlayoff'] = 'Y'
+
+    #test_data = test_data.drop(columns=["probabilities"])
+    test_data = test_data[['tmID', 'playoff', 'predictedPlayoff', 'finalPlayoff', 'probabilities']]
+
+    print("The " + model.__class__.__name__ + " Predicted:")
+    print(test_data)
+
+    for metric in metrics:
+        pred = predictions
+        if metric == "acc" or metric == "f1":
+            pred = test_data['finalPlayoff'].map({"Y": 1, "N": 0})
+        stat = str(evaluate_model(metric, test_data_labels, pred, probabilities))
+
+
+        print("The " + metric + " is: " + stat)
+
+def main():
+    pd.set_option('display.max_rows', None)
+
+
+    data, total_ints = getData()
+
+    problem_type = "Classification"
+
+
+    if problem_type == "Regression":
+        train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff = preprocess(data, total_ints, 10, "winRatio", False)
+        models = getModels(problem_type)
+
+        best_model = getBestModel(models, train_data, train_data_labels, test_data, test_data_labels, problem_type, "r2")
+
+        train_data, test_data, metric_per_feature = forward_selection(best_model, train_data, test_data, train_data_labels, test_data_labels, problem_type, "mae")
+
+        predict_win_ratio(best_model, train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, ["mae", "f1"])
+    elif problem_type == "Classification":
+        train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff = preprocess(data, total_ints, 10, "playoff", True)
+
+        models = getModels(problem_type)
+
+
+        best_model = getBestModel(models, train_data, train_data_labels, test_data, test_data_labels, problem_type, "error")
+
+        train_data, test_data, metric_per_feature = forward_selection(best_model, train_data, test_data, train_data_labels, test_data_labels, problem_type, "error")
+
+        predict_playoff(best_model, train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, ["error", "f1", "acc", "auc"])
+
+
+
+
 
 if __name__ == "__main__":
     main()
