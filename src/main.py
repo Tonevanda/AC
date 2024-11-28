@@ -98,7 +98,7 @@ def players_per_team_averages(players_per_team, coaches, year, team_info, player
     columns = ['playerID', 'year', 'tmID', 'playoff']
     if problem_type == "Regression":
         columns.append('winRatio')
-    players_per_team_year = players_per_team_year[['playerID', 'year', 'tmID', 'playoff']]
+    players_per_team_year = players_per_team_year[columns]
 
 
 
@@ -255,7 +255,7 @@ def getData(problem_type):
 
     columns = ['tmID', 'year', 'playoff']
     if problem_type == "Regression":
-        columns.append('winRate')
+        columns.append('winRatio')
     columns.extend(team_info)
     teams = teams[columns]
     players_team_columns = ['playerID', 'year', 'tmID', 'stint']
@@ -792,21 +792,21 @@ def plot_metric_per_features(data, total_ints, current_year, problem_type, metri
     metric_per_feature_plot.plot(kind="line")
     plt.xlabel('Number of Features')
     plt.ylabel("Theoretical Best Error")
-    plt.title("Theoretical Best Error per Number of Features using " + model.__class__.__name__)
+    plt.title("Theoretical Best Error per Number of Features using " + model.__class__.__name__ + " for year 10")
     plt.tight_layout()
     plt.legend().remove()
     plt.show()
 
 def main():
     pd.set_option('display.max_rows', None)
-    problem_type = "Classification"
-    metric_to_choose_best_model = "error"
+    problem_type = "Regression"
+    metric_to_choose_best_model = "mae"
 
     data, total_ints = getData(problem_type)
 
     
 
-    plot_metric_per_features(data, total_ints, 10, problem_type, metric_to_choose_best_model)
+    #plot_metric_per_features(data, total_ints, 10, problem_type, metric_to_choose_best_model)
 
     #run_best_prediction(data, total_ints, 10, problem_type, metric_to_choose_best_model, True)
     #model, train_data, train_data_labels, test_data, test_data_labels = run_best_prediction(data, total_ints, 10, problem_type, metric_to_choose_best_model, True)
@@ -814,7 +814,7 @@ def main():
 
     #plot_roc_curve(model, train_data, train_data_labels, test_data, test_data_labels)
 
-    #run_predictions(data, total_ints, 10, problem_type, metric_to_choose_best_model, True)
+    run_predictions(data, total_ints, 10, problem_type, metric_to_choose_best_model, True)
 
     #cross_validation(data, total_ints, problem_type, metric_to_choose_best_model, False)
 
