@@ -15,9 +15,12 @@ from sklearn.svm import SVC
 import xgboost as xgb
 from sklearn.model_selection import GridSearchCV
 from sklearn.feature_selection import RFE
+from sklearn.model_selection import learning_curve
+from sklearn.base import clone
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, f1_score, make_scorer, roc_curve, auc
 
+grid_results = []
 
 def loadData():
     awards_players = pd.read_csv("../data/awards_players.csv")
@@ -68,7 +71,7 @@ def weighted_average_attributes(players_per_team_prev_years_original, players_pe
 
 
 
-def players_per_team_averages(players_per_team, coaches, year, team_info, player_info, coach_info):
+def players_per_team_averages(players_per_team, coaches, year, team_info, player_info, coach_info, problem_type):
     """
     This function calculates the average of the players in each team for a given year, based on the past years.
     If year is 7, it will calculate the averages for the years 1 to 6.
@@ -92,8 +95,10 @@ def players_per_team_averages(players_per_team, coaches, year, team_info, player
     player_averages = weighted_average_attributes(players_per_team_prev_years, players_per_team_year, year, player_info, "playerID")
 
 
-
-    players_per_team_year = players_per_team_year[['playerID', 'year', 'tmID', 'playoff', 'winRatio']]
+    columns = ['playerID', 'year', 'tmID', 'playoff']
+    if problem_type == "Regression":
+        columns.append('winRatio')
+    players_per_team_year = players_per_team_year[['playerID', 'year', 'tmID', 'playoff']]
 
 
 
@@ -132,6 +137,9 @@ def players_per_team_averages(players_per_team, coaches, year, team_info, player
     teams_prev_years = players_per_team_prev_years.drop_duplicates(subset=['tmID', 'year'])
     teams_current_year = players_per_team_year.drop_duplicates(subset=['tmID', 'year'])
 
+
+    
+
     team_averages = weighted_average_attributes(teams_prev_years, teams_current_year, year, team_info, "tmID")
 
 
@@ -144,7 +152,9 @@ def players_per_team_averages(players_per_team, coaches, year, team_info, player
 
 
 
-    columns = ['tmID', 'year', 'playoff', 'winRatio']
+    columns = ['tmID', 'year', 'playoff']
+    if problem_type == "Regression":
+        columns.append('winRatio')
     columns.extend(team_info)
     columns.extend(player_info)
     columns.extend(coach_info)
@@ -212,28 +222,30 @@ def profile_plot(data):
     plt.show()"""
 
 
-def getData():
+def getData(problem_type):
     awards_players, coaches, players_teams, players, teams_post, teams, series_post = loadData()
 
     teams['winRatio'] = teams['won'] / (teams['won'] + teams['lost'])
 
-    """teams['playoff'] = 'N'
+    teams['playoff'] = 'N'
     for year in range(1, 12):
         teams_in_year = teams[teams['year'] == year]
         if not teams_in_year.empty:
             top_8_teams = teams_in_year.nlargest(8, 'winRatio').index
             teams.loc[top_8_teams, 'playoff'] = 'Y'
-    """
 
     team_info = ['rank', 'o_3pa', 'o_asts', 'o_pf', 'o_stl', 'o_to', 'o_blk', 'o_pts', 'd_fgm', 'd_ftm', 'd_fta', 'd_3pm', 'd_3pa', 'd_oreb', 'd_dreb', 'd_reb', 'd_asts', 'd_pf', 'd_stl', 'd_to', 'd_blk', 'd_pts', 'won', 'lost', 'confW', 'confL', 'min', 'attend']
 
-
+    if problem_type == "Classification":
+        team_info.append('winRatio')
 
     player_info = ['assists', 'steals', 'rebounds']
 
     coach_info = ['coachWinRatio', 'coachPostWinRatio']
 
-    columns = ['tmID', 'year', 'playoff', 'winRatio']
+    columns = ['tmID', 'year', 'playoff']
+    if problem_type == "Regression":
+        columns.append('winRatio')
     columns.extend(team_info)
     columns.extend(player_info)
     columns.extend(coach_info)
@@ -241,7 +253,9 @@ def getData():
     data = pd.DataFrame(columns=columns)
 
 
-    columns = ['tmID', 'year', 'playoff', 'winRatio']
+    columns = ['tmID', 'year', 'playoff']
+    if problem_type == "Regression":
+        columns.append('winRate')
     columns.extend(team_info)
     teams = teams[columns]
     players_team_columns = ['playerID', 'year', 'tmID', 'stint']
@@ -251,7 +265,7 @@ def getData():
 
     # Calculate the best player stats for each team for each year
     for year in range(2, 11):
-        data = pd.concat([data, players_per_team_averages(players_per_team, coaches, year, team_info, player_info, coach_info)])
+        data = pd.concat([data, players_per_team_averages(players_per_team, coaches, year, team_info, player_info, coach_info, problem_type)])
 
 
     data = rename_attributes(data, player_info)
@@ -284,17 +298,23 @@ def preprocess(data, total_ints, current_year, problem_type):
         test_data[label] = test_data[label].map({'Y': 1, 'N': 0})
     test_data_labels = test_data[label]
     
-    train_data = train_data.drop(columns=['winRatio', 'year', 'tmID', 'playoff'])
+    train_data = train_data.drop(columns=['year', 'tmID', 'playoff'])
+    if problem_type == "Regression":
+        train_data = train_data.drop(columns=['winRatio'])
     test_data_tmID = test_data['tmID']
     test_data_playoff = test_data['playoff']
 
-    test_data = test_data.drop(columns=['year', 'winRatio', 'tmID', 'playoff'])
+    test_data = test_data.drop(columns=['year', 'tmID', 'playoff'])
+    if problem_type == "Regression":
+        test_data = test_data.drop(columns=['winRatio'])
+    elif problem_type == "Playoff":
+        total_ints.append('winRatio')
     
 
 
     scaler = StandardScaler()
     scaler.fit(train_data[total_ints])
-
+    print(total_ints)
 
     train_data.loc[:, total_ints] = scaler.transform(train_data[total_ints])
     test_data.loc[:, total_ints] = scaler.transform(test_data[total_ints])
@@ -371,7 +391,7 @@ def forward_selection(model, original_train_data, original_test_data, train_data
     elif problem_type == "Regression":
         rfe_model = LinearRegression()
     best_stat = -10000000
-    if metric == "error" or metric == "mae":
+    if metric == "error" or metric == "mae" or metric == "mse":
         best_stat = 10000000
     best_columns = None
     metric_per_features = []
@@ -399,47 +419,143 @@ def forward_selection(model, original_train_data, original_test_data, train_data
             stat = evaluate_model(metric, test_data_labels, predictions)
         
         metric_per_features.append((stat, len(new_columns)))
-        if (metric == "error" or metric == "mae") and stat < best_stat:
+        if (metric == "error" or metric == "mae" or metric == "mse") and stat < best_stat:
             best_stat = stat
             best_columns = new_columns
-        elif metric != "error" and metric != "mae" and stat > best_stat:
+        elif metric != "error" and metric != "mae" and metric != "mse" and stat > best_stat:
             best_stat = stat
             best_columns = new_columns
 
     return original_train_data[best_columns], original_test_data[best_columns], metric_per_features
 
+def grid_search_model(model, train_data, train_data_labels):
+    #match(model.__class__.__name__):
+        
+        
+
+    parameter_xgb = {
+        'n_estimators': [50, 100, 200],         # Number of boosting rounds (trees)
+        'learning_rate': [0.01, 0.05, 0.1],     # Step size (learning rate)
+        'max_depth': [3, 5, 7],                  # Maximum depth of each tree
+        #'min_child_weight': [1, 2, 5],            # Minimum sum of instance weight in a child
+        #'subsample': [0.7, 0.8, 0.9, 1.0],       # Fraction of data for each tree
+        #'colsample_bytree': [0.7, 0.8, 0.9, 1.0], # Fraction of features for each tree
+        #'gamma': [0, 0.1, 0.2],                 # Minimum loss reduction for splitting
+        #'reg_alpha': [0, 0.01, 0.1],             # L1 regularization term
+        #'reg_lambda': [0, 0.01, 0.1],            # L2 regularization term
+        #'scale_pos_weight': [1, 10, 50],          # Balance class weights for imbalanced data
+    }
+    parameter_dict = {"XGBClassifier": parameter_xgb}
+
+    if model.__class__.__name__ not in parameter_dict or True:
+        print("parameters for " + model.__class__.__name__ + " do not exist")
+        return None
+
+    model_params = parameter_dict[model.__class__.__name__]
+
+
+    scorer = make_scorer(f1_score)
+
+    grid_obj = GridSearchCV(
+        estimator=model,
+        scoring=scorer,
+        param_grid=model_params,
+        cv=5,
+        n_jobs=-1
+    )
+    
+    
+    grid_obj = grid_obj.fit(train_data, train_data_labels)
+
+
+    cv_results = grid_obj.cv_results_
+    models_tested = cv_results['params']
+
+    models = [model]
+    for model_params in models_tested:
+        model_tested = clone(model)
+        model_tested.set_params(**model_params)
+        models.append(model_tested)
+
+        
+
+    return models
+
 def getModels(problem_type):
     if problem_type == "Regression":
-        return [LinearRegression(), DecisionTreeRegressor(random_state=42), RandomForestRegressor(random_state=42), SVR(), xgb.XGBRegressor(), MLPRegressor(random_state=42)]
+        return [get_model("LinearRegression"), DecisionTreeRegressor(random_state=42), RandomForestRegressor(random_state=42), SVR(), xgb.XGBRegressor(), MLPRegressor(random_state=42)]
     elif problem_type == "Classification":
-        return [LogisticRegression(random_state=42), SVC(random_state=912, kernel='linear', probability=True), xgb.XGBClassifier(seed=82), MLPClassifier(random_state=42)]
+        return [LogisticRegression(random_state=42), SVC(random_state=912, kernel='linear', probability=True), xgb.XGBClassifier(), MLPClassifier(random_state=42)]
 
-def getBestModel(models, train_data, train_data_labels, test_data, test_data_labels, problem_type, metric = "error"):
+def get_model(model_name, getDefault = True):
+    if getDefault:
+        match(model_name):
+            case "XGBClassifier":
+                return xgb.XGBClassifier()
+            case "LogisticRegression":
+                return LogisticRegression()
+            case "SVC":
+                return SVC()
+            case "MLPClassifier":
+                return MLPClassifier()
+            case "LinearRegression":
+                return LinearRegression()
+            case "DecisionTreeRegressor":
+                return DecisionTreeRegressor()
+            case "RandomForestRegressor":
+                return RandomForestRegressor()
+            case "SVR":
+                return SVR()
+            case "XGBRegressor":
+                return xgb.XGBRegressor()
+            case "MLPRegressor":
+                return MLPRegressor()
+
+def getBestModel(models, train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, problem_type, metric = "error"):
+    def print_params(model, metric, stat):
+        model_params = model.get_params()
+
+        default_model = get_model(model.__class__.__name__)
+        default_params = default_model.get_params()
+        non_default_params = {name: value for name, value in model_params.items() if value != default_params[name]}
+        grid_results.append((model.__class__.__name__, non_default_params, stat, metric))
+        print(f"{metric} of {str(stat)} for model: {model.__class__.__name__}({non_default_params})")
     best_model = None
+    best_train_feat = None
+    best_test_feat = None
 
     best_stat = -1000000
 
-    if metric == "mae" or metric == "error":
+    if metric == "mae" or metric == "error" or metric == "mse":
         best_stat = 100000000
 
-
+    grid_models = []
     for model in models:
-        stat = None
-        if problem_type == "Classification":
-            predictions, probabilities, _, _ = train_predict_classifier(model, train_data, train_data_labels, test_data, test_data_labels)
-            stat = evaluate_model(metric, test_data_labels, predictions, probabilities)
-        elif problem_type == "Regression":
-            predictions, _ = train_predict_regression(model, train_data, train_data_labels, test_data, test_data_labels)
-            stat = evaluate_model(metric, test_data_labels, predictions)
+        print("Grid Searching " + model.__class__.__name__)
+        grid_model = grid_search_model(model, train_data, train_data_labels)
+        if grid_model != None:
+            grid_models.extend(grid_model)
+        else:
+            grid_models.append(model)
+    for model in grid_models:
+        print("Forward Selectioning " + model.__class__.__name__)
+        train_data_feat, test_data_feat, _ = forward_selection(model, train_data, test_data, train_data_labels, test_data_labels, problem_type, metric)
 
-        if (metric == "mae" or metric == "error") and stat < best_stat:
+        _, _, stats = predict(model, train_data_feat, train_data_labels, test_data_feat.copy(), test_data_labels, test_data_tmID, test_data_playoff, problem_type, [metric])
+        stat = float(stats[0][1])
+        print_params(model, metric, stat)
+        if (metric == "mae" or metric == "error" or metric == "mse") and stat < best_stat:
             best_stat = stat
             best_model = model
-        elif metric != "mae" and metric != "error" and stat > best_stat:
+            best_train_feat = train_data_feat
+            best_test_feat = test_data_feat
+        elif metric != "mae" and metric != "error" and metric != "mse" and stat > best_stat:
             best_stat = stat
             best_model = model
+            best_train_feat = train_data_feat
+            best_test_feat = test_data_feat
 
-    return best_model
+    return best_model, best_train_feat, best_test_feat
 
 
 
@@ -477,61 +593,6 @@ def predict(model, train_data, train_data_labels, test_data, test_data_labels, t
             stat = str(evaluate_model(metric, test_data_labels, pred, probabilities))
             stats.append((metric, stat))
     elif problem_type == "Regression":
-        def fine_tune_model(model, train_data, train_data_labels):
-            match(model.__class__.__name__):
-                case "RandomForestRegressor":
-                    return RandomForestRegressor(random_state=42)
-                case "SVR":
-                    #return SVR(C=0.1, gamma='auto', kernel='poly')
-                    return SVR(C=0.1, kernel="linear")
-                case "MLPClassifier":
-                    return 
-                
-
-            parameter_rf = {
-            'n_estimators': [50, 100, 200, 300],      # Number of trees in the forest
-            'max_depth': [None, 10, 20, 30, 50],      # Maximum depth of each tree
-            'min_samples_split': [2, 5, 10],          # Minimum number of samples to split an internal node
-            'min_samples_leaf': [1, 2, 4],            # Minimum number of samples required to be at a leaf node
-            'max_features': ['auto', 'sqrt', 'log2'], # Number of features to consider when looking for the best split
-            'bootstrap': [True, False],               # Whether to use bootstrapping when building trees
-            'random_state': [42],                     # Fixed seed for reproducibility
-            }
-
-            parameter_svr = {
-                'C': [0.1, 1, 10, 100, 1000],              # Regularization parameter
-                'kernel': ['linear', 'poly', 'rbf', 'sigmoid'],  # Type of kernel
-                'epsilon': [0.01, 0.1, 0.5, 1, 1.5],        # Epsilon
-                'gamma': ['scale', 'auto', 0.1, 1, 10],     # Kernel coefficient (relevant for 'rbf', 'poly', and 'sigmoid')
-                'degree': [3, 4, 5]                        # Degree of the polynomial kernel (only for 'poly' kernel)
-            }
-
-            parameter_dict = {"RandomForestRegressor": parameter_rf, "SVR": parameter_svr}
-
-            if parameter_dict[model.__class__.__name__] == None:
-                print("parameters for " + model.__class__.__name__ + "do not exist")
-                exit(1)
-
-            best_model_params = parameter_dict[model.__class__.__name__]
-
-
-
-            scorer = make_scorer(mean_absolute_error, greater_is_better=False)
-
-            grid_obj = GridSearchCV(
-                estimator=model,
-                scoring=scorer,
-                param_grid=best_model_params,
-                cv=5,
-                n_jobs=-1
-            )
-            
-            
-            grid_obj = grid_obj.fit(train_data, train_data_labels)
-
-            model = grid_obj.best_estimator_
-
-            return model
 
         #best_model = fine_tune_model(best_model, train_data, train_data_labels)
 
@@ -563,20 +624,42 @@ def predict(model, train_data, train_data_labels, test_data, test_data_labels, t
 
     return test_data, model, stats
 
-def cross_validation(data, total_ints, metric_for_fs_classifer, metric_for_fs_regression, printResults = False):
+def cross_validation(data, total_ints, problem_type, metric_to_choose_best_model, printResults = False):
+    years = []
+    models = getModels(problem_type)
+    model_names = [model.__class__.__name__ for model in models]
+    model_lines = {}
+    for model_name in model_names:
+        model_lines[model_name] = []
     for year in range(3, 11):
-        results = run_predictions(data, total_ints, year, metric_for_fs_classifer, metric_for_fs_regression, printResults)
-        for (model, final_data, stats) in results:
-            print("Model in year " + str(year) + " : " + model.__class__.__name__)
+        years.append(year)
+        results = run_predictions(data, total_ints, year, problem_type, metric_to_choose_best_model, printResults)
+        for (model, _, stats) in results:
+            for (metric, stat) in stats:
+                if metric == metric_to_choose_best_model:
+                    model_lines[model.__class__.__name__].append(stat)
+
+    model_stats = pd.DataFrame({model_name: model_lines[model_name] for model_name in model_names})
+
+    model_stats.index = years
+    model_stats = model_stats.astype(float)
+    model_stats.plot(kind="line")
+    plt.xlabel('Year')
+    plt.ylabel(metric_to_choose_best_model)
+    plt.title("Model's " + metric_to_choose_best_model + " over the years of training and testing")
+    plt.xticks(years, labels=years)
+    plt.legend(title="Models")
+    plt.tight_layout()
+    plt.show()
 
 
-def run_predictions(data, total_ints, current_year, metric_for_fs_classifiaction, metric_for_fs_regression, printResults = False):
-    problem_type = "Classification"
+
+def run_predictions(data, total_ints, current_year, problem_type, metric_to_choose_best_model, printResults = False):
     original_train_data, train_data_labels, original_test_data, test_data_labels, test_data_tmID, test_data_playoff = preprocess(data, total_ints, current_year, problem_type)
 
     results = []
     for model in getModels(problem_type):
-        train_data, test_data, metric_per_feature = forward_selection(model, original_train_data, original_test_data, train_data_labels, test_data_labels, problem_type, metric_for_fs_classifiaction)
+        train_data, test_data, _ = forward_selection(model, original_train_data, original_test_data, train_data_labels, test_data_labels, problem_type, metric_to_choose_best_model)
         final_data, model, stats = predict(model, train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, problem_type, "all")
         results.append((model, final_data, stats))
         if printResults:
@@ -588,22 +671,7 @@ def run_predictions(data, total_ints, current_year, metric_for_fs_classifiaction
                 else:
                     print("The " + metric + " is: " + str(stat))
 
-    problem_type = "Regression"
-    original_train_data, train_data_labels, original_test_data, test_data_labels, test_data_tmID, test_data_playoff = preprocess(data, total_ints, current_year, problem_type)
 
-
-    for model in getModels(problem_type):
-        train_data, test_data, metric_per_feature = forward_selection(model, original_train_data, original_test_data, train_data_labels, test_data_labels, problem_type, metric_for_fs_regression)
-        final_data, model, stats = predict(model, train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, problem_type, "all")
-        results.append((model, final_data, stats))
-        if printResults:
-            print("The " + model.__class__.__name__ + " Predicted:")
-            print(final_data)
-            for (metric, stat) in stats:
-                if metric == "f1" or metric == "acc" or metric == "r2" or metric == "auc":
-                    print("The " + metric + " is: " + str(stat) + "%")
-                else:
-                    print("The " + metric + " is: " + str(stat))
 
     return results
     
@@ -612,36 +680,152 @@ def run_best_prediction(data, total_ints, current_year, problem_type, metric_to_
     train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff = preprocess(data, total_ints, current_year, problem_type)
     models = getModels(problem_type)
 
-    best_model = getBestModel(models, train_data, train_data_labels, test_data, test_data_labels, problem_type, metric_to_choose_best_model)
+    models = models[2]
 
-    train_data, test_data, metric_per_feature = forward_selection(best_model, train_data, test_data, train_data_labels, test_data_labels, problem_type, metric_to_choose_best_model)
+    best_model, train_data, test_data = getBestModel([models], train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, problem_type, metric_to_choose_best_model)
 
-    test_data, model, stats = predict(best_model, train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, problem_type, "all")
+
+    final_data, model, stats = predict(best_model, train_data, train_data_labels, test_data.copy(), test_data_labels, test_data_tmID, test_data_playoff, problem_type, "all")
 
     if printResults:
         print("The " + model.__class__.__name__ + " Predicted:")
-        print(test_data)
+        print(final_data)
         for (metric, stat) in stats:
             if metric == "f1" or metric == "acc" or metric == "r2" or metric == "auc":
                 print("The " + metric + " is: " + str(stat) + "%")
             else:
                 print("The " + metric + " is: " + str(stat))
 
+    return best_model, train_data, train_data_labels, test_data, test_data_labels
+
+
+def plot_roc_curve(model, train_data, train_data_labels, test_data, test_data_labels):
+    _, probabilities, _, _ = train_predict_classifier(model, train_data, train_data_labels, test_data, test_data_labels)
+
+    fpr, tpr, _ = roc_curve(test_data_labels, probabilities[:, 1])
+
+    roc_plot = pd.DataFrame({
+        "Curve": tpr
+    })
+
+    roc_plot.index = fpr
+
+
+    roc_plot.plot(kind="line")
+    plt.xlabel('False Positive Rate')
+    plt.ylabel("True Positive Rate")
+    plt.title("ROC Curve of " + model.__class__.__name__)
+    plt.tight_layout()
+    plt.legend().remove()
+    plt.show()
+
+def plot_learning_curve(model, train_data, train_data_labels, test_data, test_data_labels):
+    _, probabilities, _, _ = train_predict_classifier(model, train_data, train_data_labels, test_data, test_data_labels)
+
+    fpr, tpr, _ = roc_curve(test_data_labels, probabilities[:, 1])
+
+    roc_plot = pd.DataFrame({
+        "Curve": tpr
+    })
+
+    roc_plot.index = fpr
+
+
+    roc_plot.plot(kind="line")
+    plt.xlabel('False Positive Rate')
+    plt.ylabel("True Positive Rate")
+    plt.title("ROC Curve of " + model.__class__.__name__)
+    plt.tight_layout()
+    plt.legend().remove()
+    plt.show()
+
+def plot_data_balance(data):
+    playoff_teams = len(data[data['playoff'] == 'Y'])
+    non_playoff_teams = len(data[data['playoff'] == 'N'])
+
+
+    balance_plot = pd.DataFrame({
+        "Playoff": [playoff_teams, non_playoff_teams],
+    })
+
+    values = ['Y', 'N']
+    balance_plot.index = values
+
+
+
+    balance_plot.plot(kind="bar")
+    plt.xticks(rotation=0)
+    plt.xlabel('If Team went to Playoff')
+    plt.ylabel("Number of Teams")
+    plt.title("Team playoff distribution")
+    plt.tight_layout()
+    plt.legend().remove()
+    plt.show()
+
+
+def plot_metric_per_features(data, total_ints, current_year, problem_type, metric_to_choose_best_model):
+    train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff = preprocess(data, total_ints, current_year, problem_type)
+
+    if problem_type == "Classification":
+        model = xgb.XGBClassifier()
+    elif problem_type == "Regression":
+        model = MLPRegressor()
+
+    print(test_data.columns)
+    train_data, test_data, metric_per_feature = forward_selection(model, train_data, test_data, train_data_labels, test_data_labels, problem_type, metric_to_choose_best_model)
+    print(test_data.columns)
+    metrics = []
+    feature_nums = []
+    for (metric, num_feature) in metric_per_feature:
+        metrics.append(metric)
+        feature_nums.append(num_feature)
+
+
+    metric_per_feature_plot = pd.DataFrame({
+        "MetricPerFeature": metrics
+    })
+
+    metric_per_feature_plot.index = feature_nums
+
+
+
+    metric_per_feature_plot.plot(kind="line")
+    plt.xlabel('Number of Features')
+    plt.ylabel("Theoretical Best Error")
+    plt.title("Theoretical Best Error per Number of Features using " + model.__class__.__name__)
+    plt.tight_layout()
+    plt.legend().remove()
+    plt.show()
+
 def main():
     pd.set_option('display.max_rows', None)
+    problem_type = "Classification"
+    metric_to_choose_best_model = "error"
 
+    data, total_ints = getData(problem_type)
 
-    data, total_ints = getData()
+    
 
-    problem_type = "Regression"
-    metric_to_choose_best_model = "r2"
-
+    plot_metric_per_features(data, total_ints, 10, problem_type, metric_to_choose_best_model)
 
     #run_best_prediction(data, total_ints, 10, problem_type, metric_to_choose_best_model, True)
+    #model, train_data, train_data_labels, test_data, test_data_labels = run_best_prediction(data, total_ints, 10, problem_type, metric_to_choose_best_model, True)
 
-    #run_predictions(data, total_ints, 10, "error", "r2", True)
 
-    cross_validation(data, total_ints, "error", "r2", False)
+    #plot_roc_curve(model, train_data, train_data_labels, test_data, test_data_labels)
+
+    #run_predictions(data, total_ints, 10, problem_type, metric_to_choose_best_model, True)
+
+    #cross_validation(data, total_ints, problem_type, metric_to_choose_best_model, False)
+
+
+
+    '''model_n = "XGBClassifier"
+    best_stat = 1000000
+    for (model_name, params, stat, metric) in grid_results:
+        if model_name == model_n and stat < best_stat:
+            best_stat = stat
+            print(f"best {metric} of {str(stat)} for best model: {model_name}({params})")'''
 
     
 
