@@ -257,6 +257,7 @@ def getData(problem_type):
     teams['winRatio'] = teams['won'] / (teams['won'] + teams['lost'])
 
 
+
     team_info = ['rank', 'o_3pa', 'o_asts', 'o_pf', 'o_stl', 'o_to', 'o_blk', 'o_pts', 'd_fgm', 'd_ftm', 'd_fta', 'd_3pm', 'd_3pa', 'd_oreb', 'd_dreb', 'd_reb', 'd_asts', 'd_pf', 'd_stl', 'd_to', 'd_blk', 'd_pts', 'won', 'lost', 'confW', 'confL', 'min', 'attend']
 
     if problem_type == "Classification":
@@ -266,7 +267,8 @@ def getData(problem_type):
 
     coach_info = ['coachWinRatio', 'coachPostWinRatio']
 
-    columns = ['tmID', 'year', 'playoff']
+
+    columns = ['tmID', 'year', 'confID', 'playoff']
     if problem_type == "Regression":
         columns.append('winRatio')
     columns.extend(team_info)
@@ -276,7 +278,7 @@ def getData(problem_type):
     data = pd.DataFrame(columns=columns)
 
 
-    columns = ['tmID', 'year', 'playoff']
+    columns = ['tmID', 'year', 'confID', 'playoff']
     if problem_type == "Regression":
         columns.append('winRatio')
     columns.extend(team_info)
@@ -321,13 +323,14 @@ def preprocess(data, total_ints, current_year, problem_type):
         test_data[label] = test_data[label].map({'Y': 1, 'N': 0})
     test_data_labels = test_data[label]
     
-    train_data = train_data.drop(columns=['year', 'tmID', 'playoff'])
+    train_data = train_data.drop(columns=['year', 'tmID', 'confID', 'playoff'])
     if problem_type == "Regression":
         train_data = train_data.drop(columns=['winRatio'])
     test_data_tmID = test_data['tmID']
     test_data_playoff = test_data['playoff']
+    test_data_confID = test_data['confID']
 
-    test_data = test_data.drop(columns=['year', 'tmID', 'playoff'])
+    test_data = test_data.drop(columns=['year', 'tmID', 'confID', 'playoff'])
     if problem_type == "Regression":
         test_data = test_data.drop(columns=['winRatio'])
     elif problem_type == "Playoff":
@@ -342,7 +345,7 @@ def preprocess(data, total_ints, current_year, problem_type):
     train_data.loc[:, total_ints] = scaler.transform(train_data[total_ints])
     test_data.loc[:, total_ints] = scaler.transform(test_data[total_ints])
 
-    return train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff
+    return train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, test_data_confID
 
 def calculate_error(probabilities, test_data_labels):
     error = []
@@ -534,7 +537,7 @@ def get_model(model_name, getDefault = True):
             case "MLPRegressor":
                 return MLPRegressor()
 
-def getBestModel(models, train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, problem_type, metric = "error"):
+def getBestModel(models, train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, test_data_confID, problem_type, metric = "error"):
     def print_params(model, metric, stat):
         model_params = model.get_params()
 
@@ -564,7 +567,7 @@ def getBestModel(models, train_data, train_data_labels, test_data, test_data_lab
         print("Forward Selectioning " + model.__class__.__name__)
         train_data_feat, test_data_feat, _ = forward_selection(model, train_data, test_data, train_data_labels, test_data_labels, problem_type, metric)
 
-        _, _, stats = predict(model, train_data_feat, train_data_labels, test_data_feat.copy(), test_data_labels, test_data_tmID, test_data_playoff, problem_type, [metric])
+        _, _, stats = predict(model, train_data_feat, train_data_labels, test_data_feat.copy(), test_data_labels, test_data_tmID, test_data_playoff, test_data_confID, problem_type, [metric])
         stat = float(stats[0][1])
         print_params(model, metric, stat)
         if (metric == "mae" or metric == "error" or metric == "mse") and stat < best_stat:
@@ -582,7 +585,7 @@ def getBestModel(models, train_data, train_data_labels, test_data, test_data_lab
 
 
 
-def predict(model, train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, problem_type, metrics):
+def predict(model, train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, test_data_confID, problem_type, metrics):
     stats = []
     if problem_type == "Classification":    
         predictions, probabilities, _, _, = train_predict_classifier(model, train_data, train_data_labels, test_data, test_data_labels)
@@ -595,6 +598,7 @@ def predict(model, train_data, train_data_labels, test_data, test_data_labels, t
 
         test_data['tmID'] = test_data_tmID
         test_data['playoff'] = test_data_labels.map({1: "Y", 0: "N"})
+        test_data['confID'] = test_data_confID
         test_data['predictedPlayoff'] = predictions
         test_data['predictedPlayoff'] = test_data['predictedPlayoff'].map({1: "Y", 0: "N"})
         test_data['finalPlayoff'] = final_playoff
@@ -604,7 +608,7 @@ def predict(model, train_data, train_data_labels, test_data, test_data_labels, t
         test_data.loc[top_8_teams, 'finalPlayoff'] = 'Y'
 
         #test_data = test_data.drop(columns=["probabilities"])
-        test_data = test_data[['tmID', 'playoff', 'predictedPlayoff', 'finalPlayoff', 'probabilities']]
+        test_data = test_data[['tmID', 'confID', 'playoff', 'predictedPlayoff', 'finalPlayoff', 'probabilities']]
 
 
         if metrics == "all":
@@ -678,12 +682,12 @@ def cross_validation(data, total_ints, problem_type, metric_to_choose_best_model
 
 
 def run_predictions(data, total_ints, current_year, problem_type, metric_to_choose_best_model, printResults = False):
-    original_train_data, train_data_labels, original_test_data, test_data_labels, test_data_tmID, test_data_playoff = preprocess(data, total_ints, current_year, problem_type)
+    original_train_data, train_data_labels, original_test_data, test_data_labels, test_data_tmID, test_data_playoff, test_data_confID = preprocess(data, total_ints, current_year, problem_type)
 
     results = []
     for model in getModels(problem_type):
         train_data, test_data, _ = forward_selection(model, original_train_data, original_test_data, train_data_labels, test_data_labels, problem_type, metric_to_choose_best_model)
-        final_data, model, stats = predict(model, train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, problem_type, "all")
+        final_data, model, stats = predict(model, train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, test_data_confID, problem_type, "all")
         results.append((model, final_data, stats))
         if printResults:
             print("The " + model.__class__.__name__ + " Predicted:")
@@ -700,15 +704,15 @@ def run_predictions(data, total_ints, current_year, problem_type, metric_to_choo
     
 
 def run_best_prediction(data, total_ints, current_year, problem_type, metric_to_choose_best_model, printResults = False):
-    train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff = preprocess(data, total_ints, current_year, problem_type)
+    train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, test_data_confID = preprocess(data, total_ints, current_year, problem_type)
     models = getModels(problem_type)
 
 
 
-    best_model, train_data, test_data = getBestModel(models, train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, problem_type, metric_to_choose_best_model)
+    best_model, train_data, test_data = getBestModel(models, train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, test_data_confID, problem_type, metric_to_choose_best_model)
 
 
-    final_data, model, stats = predict(best_model, train_data, train_data_labels, test_data.copy(), test_data_labels, test_data_tmID, test_data_playoff, problem_type, "all")
+    final_data, model, stats = predict(best_model, train_data, train_data_labels, test_data.copy(), test_data_labels, test_data_tmID, test_data_playoff, test_data_confID, problem_type, "all")
 
     if printResults:
         print("The " + model.__class__.__name__ + " Predicted:")
@@ -787,7 +791,7 @@ def plot_data_balance(data):
 
 
 def plot_metric_per_features(data, total_ints, current_year, problem_type, metric_to_choose_best_model):
-    train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff = preprocess(data, total_ints, current_year, problem_type)
+    train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, test_data_confID = preprocess(data, total_ints, current_year, problem_type)
 
     if problem_type == "Classification":
         model = xgb.XGBClassifier()
