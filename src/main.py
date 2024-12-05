@@ -256,12 +256,6 @@ def getData(problem_type):
 
     teams['winRatio'] = teams['won'] / (teams['won'] + teams['lost'])
 
-    teams['playoff'] = 'N'
-    for year in range(1, 12):
-        teams_in_year = teams[teams['year'] == year]
-        if not teams_in_year.empty:
-            top_8_teams = teams_in_year.nlargest(8, 'winRatio').index
-            teams.loc[top_8_teams, 'playoff'] = 'Y'
 
     team_info = ['rank', 'o_3pa', 'o_asts', 'o_pf', 'o_stl', 'o_to', 'o_blk', 'o_pts', 'd_fgm', 'd_ftm', 'd_fta', 'd_3pm', 'd_3pa', 'd_oreb', 'd_dreb', 'd_reb', 'd_asts', 'd_pf', 'd_stl', 'd_to', 'd_blk', 'd_pts', 'won', 'lost', 'confW', 'confL', 'min', 'attend']
 
