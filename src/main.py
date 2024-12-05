@@ -32,6 +32,13 @@ def loadData():
     series_post = pd.read_csv("../data/series_post.csv")
     return awards_players, coaches, players_teams, players, teams_post, teams, series_post
 
+def loadDataComp():
+    coaches = pd.read_csv("../comp/coaches.csv")
+    players_teams = pd.read_csv("../comp/players_teams.csv")
+    teams = pd.read_csv("../comp/teams.csv")
+
+    return coaches, players_teams, teams
+
 def weighted_average_attributes(players_per_team_prev_years_original, players_per_team_year, current_year, columns, groupby_attribute):
     players_per_team_prev_years = players_per_team_prev_years_original.copy()
     k = 0.5
@@ -221,9 +228,31 @@ def profile_plot(data):
     plt.ylabel('Values')
     plt.show()"""
 
+def fillCompData(teams, coaches, players_teams):
+    def fixMissingColumns(tableWithData, tableWithMissingData):
+        missing_columns = set(tableWithData.columns) - set(tableWithMissingData.columns)
+
+        for col in missing_columns:
+            tableWithMissingData[col] = 0.0
+
+        tableWithMissingData = tableWithMissingData[tableWithData.columns]
+        return tableWithMissingData
+
+    coachesComp, players_per_team_Comp, teamsComp = loadDataComp()
+
+    teamsComp['playoff'] = ['Y', 'N', 'Y', 'Y', 'N', 'Y', 'Y', 'Y', 'Y', 'Y', 'N', 'N']
+    
+    coaches = pd.concat([coaches, fixMissingColumns(coaches, coachesComp)])
+    players_teams = pd.concat([players_teams, fixMissingColumns(players_teams, players_per_team_Comp)])
+    teams = pd.concat([teams, fixMissingColumns(teams, teamsComp)])
+
+    return coaches, players_teams, teams
+
 
 def getData(problem_type):
     awards_players, coaches, players_teams, players, teams_post, teams, series_post = loadData()
+
+    coaches, players_teams, teams = fillCompData(teams, coaches, players_teams) 
 
     teams['winRatio'] = teams['won'] / (teams['won'] + teams['lost'])
 
@@ -264,7 +293,7 @@ def getData(problem_type):
     players_per_team = pd.merge(teams, players_teams, how="inner", left_on=["year", "tmID"], right_on=["year", "tmID"])
 
     # Calculate the best player stats for each team for each year
-    for year in range(2, 11):
+    for year in range(2, 12):
         data = pd.concat([data, players_per_team_averages(players_per_team, coaches, year, team_info, player_info, coach_info, problem_type)])
 
 
@@ -680,9 +709,9 @@ def run_best_prediction(data, total_ints, current_year, problem_type, metric_to_
     train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff = preprocess(data, total_ints, current_year, problem_type)
     models = getModels(problem_type)
 
-    models = models[2]
 
-    best_model, train_data, test_data = getBestModel([models], train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, problem_type, metric_to_choose_best_model)
+
+    best_model, train_data, test_data = getBestModel(models, train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, problem_type, metric_to_choose_best_model)
 
 
     final_data, model, stats = predict(best_model, train_data, train_data_labels, test_data.copy(), test_data_labels, test_data_tmID, test_data_playoff, problem_type, "all")
@@ -799,8 +828,8 @@ def plot_metric_per_features(data, total_ints, current_year, problem_type, metri
 
 def main():
     pd.set_option('display.max_rows', None)
-    problem_type = "Regression"
-    metric_to_choose_best_model = "mae"
+    problem_type = "Classification"
+    metric_to_choose_best_model = "error"
 
     data, total_ints = getData(problem_type)
 
@@ -808,13 +837,13 @@ def main():
 
     #plot_metric_per_features(data, total_ints, 10, problem_type, metric_to_choose_best_model)
 
-    #run_best_prediction(data, total_ints, 10, problem_type, metric_to_choose_best_model, True)
+    run_best_prediction(data, total_ints, 11, problem_type, metric_to_choose_best_model, True)
     #model, train_data, train_data_labels, test_data, test_data_labels = run_best_prediction(data, total_ints, 10, problem_type, metric_to_choose_best_model, True)
 
 
     #plot_roc_curve(model, train_data, train_data_labels, test_data, test_data_labels)
 
-    run_predictions(data, total_ints, 10, problem_type, metric_to_choose_best_model, True)
+    #run_predictions(data, total_ints, 10, problem_type, metric_to_choose_best_model, True)
 
     #cross_validation(data, total_ints, problem_type, metric_to_choose_best_model, False)
 
