@@ -461,15 +461,15 @@ def grid_search_model(model, train_data, train_data_labels):
 
     parameter_xgb = {
         'n_estimators': [50, 100, 200],         # Number of boosting rounds (trees)
-        'learning_rate': [0.01, 0.05, 0.1],     # Step size (learning rate)
-        'max_depth': [3, 5, 7],                  # Maximum depth of each tree
-        #'min_child_weight': [1, 2, 5],            # Minimum sum of instance weight in a child
-        #'subsample': [0.7, 0.8, 0.9, 1.0],       # Fraction of data for each tree
-        #'colsample_bytree': [0.7, 0.8, 0.9, 1.0], # Fraction of features for each tree
-        #'gamma': [0, 0.1, 0.2],                 # Minimum loss reduction for splitting
-        #'reg_alpha': [0, 0.01, 0.1],             # L1 regularization term
-        #'reg_lambda': [0, 0.01, 0.1],            # L2 regularization term
-        #'scale_pos_weight': [1, 10, 50],          # Balance class weights for imbalanced data
+        'learning_rate': [0.01, 0.05, 0.1, 0.3],     # Step size (learning rate)
+        'max_depth': [3, 5, 6, 7],                  # Maximum depth of each tree
+        'min_child_weight': [1, 2, 5],            # Minimum sum of instance weight in a child
+        'subsample': [0.7, 0.8, 0.9, 1.0],       # Fraction of data for each tree
+        'colsample_bytree': [0.7, 0.8, 0.9, 1.0], # Fraction of features for each tree
+        'gamma': [0, 0.1, 0.2],                 # Minimum loss reduction for splitting
+        'reg_alpha': [0, 0.01, 0.1],             # L1 regularization term
+        'reg_lambda': [0, 0.01, 0.1, 1.0],            # L2 regularization term
+        'scale_pos_weight': [1, 10, 50],          # Balance class weights for imbalanced data
     }
     parameter_dict = {"XGBClassifier": parameter_xgb}
 
@@ -714,6 +714,8 @@ def run_best_prediction(data, total_ints, current_year, problem_type, metric_to_
 
     final_data, model, stats = predict(best_model, train_data, train_data_labels, test_data.copy(), test_data_labels, test_data_tmID, test_data_playoff, test_data_confID, problem_type, "all")
 
+    writeAnswerToCsv(final_data)
+
     if printResults:
         print("The " + model.__class__.__name__ + " Predicted:")
         print(final_data)
@@ -824,6 +826,12 @@ def plot_metric_per_features(data, total_ints, current_year, problem_type, metri
     plt.legend().remove()
     plt.show()
 
+def writeAnswerToCsv(result):
+    result = result[["tmID", "probabilities"]]
+    result["Playoff"] = result["probabilities"].round(2)
+    result = result.drop(columns=["probabilities"])
+    result.to_csv("result.csv", index=False)
+
 def main():
     pd.set_option('display.max_rows', None)
     problem_type = "Classification"
@@ -853,6 +861,8 @@ def main():
         if model_name == model_n and stat < best_stat:
             best_stat = stat
             print(f"best {metric} of {str(stat)} for best model: {model_name}({params})")'''
+    
+
 
     
 
