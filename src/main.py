@@ -107,7 +107,7 @@ def players_per_team_averages(players_per_team, coaches, year, team_info, player
     player_averages = weighted_average_attributes(players_per_team_prev_years, players_per_team_year, year, player_info, "playerID")
 
 
-    columns = ['playerID', 'year', 'tmID', 'playoff']
+    columns = ['playerID', 'year', 'tmID', 'playoff', "confID"]
     if problem_type == "Regression":
         columns.append('winRatio')
     players_per_team_year = players_per_team_year[columns]
@@ -126,7 +126,7 @@ def players_per_team_averages(players_per_team, coaches, year, team_info, player
         lambda group: group.nlargest(min(min_num_of_players_per_team_per_year, player_averages_number), "Total")
     )
 
-    players_per_team_year = players_per_team_year.groupby(["tmID", "year", "playoff"]).mean(numeric_only=True)
+    players_per_team_year = players_per_team_year.groupby(["tmID", "year", "playoff", "confID"]).mean(numeric_only=True)
 
     players_per_team_year = players_per_team_year.reset_index()
 
@@ -179,7 +179,7 @@ def players_per_team_averages(players_per_team, coaches, year, team_info, player
 
 
 
-    columns = ['tmID', 'year', 'playoff']
+    columns = ['tmID', 'year', 'playoff', 'confID']
     if problem_type == "Regression":
         columns.append('winRatio')
     columns.extend(team_info)
@@ -276,8 +276,23 @@ def getData(problem_type, player_averages_number):
 
     coaches, players_teams, teams = fillCompData(teams, coaches, players_teams) 
 
+    '''teams_post = teams_post[["tmID", "year", "W", "L"]]
 
+    teams = pd.merge(teams, teams_post, how="outer", left_on=["tmID", "year"], right_on=["tmID", "year"])
+    teams = teams.fillna(0.0)
 
+    players_teams = pd.merge(players_teams, players, how="inner", left_on=["playerID"], right_on=["bioID"])
+
+    players_teams = pd.merge(players_teams, awards_players, how="outer", left_on=["playerID", "year"], right_on=["playerID", "year"])
+
+    players_teams = players_teams.fillna(0.0)
+    all_awards = awards_players["award"].unique()
+    all_awards_map = {}
+    counter = 1
+    for award in all_awards:
+        all_awards_map[award] = counter
+        counter += 1
+    players_teams["award"] = players_teams["award"].map(all_awards_map)'''
 
     teams['winRatio'] = teams['won'] / (teams['won'] + teams['lost'])
 
@@ -288,7 +303,7 @@ def getData(problem_type, player_averages_number):
     if problem_type == "Classification":
         team_info.append('winRatio')
 
-    player_info = ['assists', 'steals', 'rebounds']# 'GP', 'GS', 'minutes', 'points', 'oRebounds', 'dRebounds', 'blocks', 'turnovers', 'PF', 'fgAttempted', 'fgMade', 'ftAttempted', 'ftMade', 'threeAttempted', 'threeMade', 'dq', 'PostGP', 'PostGS', 'PostMinutes', 'PostPoints', 'PostoRebounds', 'PostdRebounds', 'PostRebounds', 'PostAssists', 'PostSteals', 'PostBlocks', 'PostTurnovers', 'PostPF', 'PostfgAttempted', 'PostfgMade', 'PostftAttempted', 'PostftMade', 'PostthreeAttempted', 'PostthreeMade', 'PostDQ']
+    player_info = ['assists', 'steals', 'rebounds']#, 'height', 'weight', 'award', 'GP', 'GS', 'minutes', 'points', 'oRebounds', 'dRebounds', 'blocks', 'turnovers', 'PF', 'fgAttempted', 'fgMade', 'ftAttempted', 'ftMade', 'threeAttempted', 'threeMade', 'dq']
 
     coach_info = ['coachWinRatio', 'coachPostWinRatio']
 
@@ -629,8 +644,24 @@ def predict(model, train_data, train_data_labels, test_data, test_data_labels, t
         test_data['finalPlayoff'] = final_playoff
         test_data['probabilities'] = probabilities_per_team
 
-        top_8_teams = test_data.nlargest(8, 'probabilities').index
-        test_data.loc[top_8_teams, 'finalPlayoff'] = 'Y'
+        top_4_teams = test_data[test_data['confID'] == "EA"].nlargest(4, 'probabilities').index
+        test_data.loc[top_4_teams, 'finalPlayoff'] = 'Y'
+
+        top_4_teams = test_data[test_data['confID'] == "WE"].nlargest(4, 'probabilities').index
+        test_data.loc[top_4_teams, 'finalPlayoff'] = 'Y'
+
+        index = 0
+        probabilities_per_team = []
+        for [_, win_prob] in probabilities:
+            table_row = test_data.iloc[index]
+            if table_row['finalPlayoff'] == 'Y':
+                probabilities[index][1] = max(0.5, win_prob)
+            else:
+                probabilities[index][1] = min(0.5, win_prob)
+            probabilities_per_team.append(probabilities[index][1])
+            index += 1
+
+        test_data['probabilities'] = probabilities_per_team
 
         #test_data = test_data.drop(columns=["probabilities"])
         test_data = test_data[['tmID', 'confID', 'playoff', 'predictedPlayoff', 'finalPlayoff', 'probabilities']]
@@ -658,8 +689,14 @@ def predict(model, train_data, train_data_labels, test_data, test_data_labels, t
         test_data.loc[:, 'playoff'] = test_data_playoff
 
         test_data['predictedPlayoff'] = 'N'
-        top_8_teams = test_data.nlargest(8, 'predictedWinRatio').index
-        test_data.loc[top_8_teams, 'predictedPlayoff'] = 'Y'
+        top_4_teams = test_data[test_data['confID'] == "EA"].nlargest(4, 'predictedWinRatio').index
+        test_data.loc[top_4_teams, 'predictedPlayoff'] = 'Y'
+
+        top_4_teams = test_data[test_data['confID'] == "WE"].nlargest(4, 'predictedWinRatio').index
+        test_data.loc[top_4_teams, 'predictedPlayoff'] = 'Y'
+
+        '''top_8_teams = test_data.nlargest(8, 'predictedWinRatio').index
+        test_data.loc[top_8_teams, 'predictedPlayoff'] = 'Y'''
 
         test_data = test_data[['tmID', 'winRatio', 'predictedWinRatio', 'playoff', 'predictedPlayoff']]
 
@@ -731,7 +768,6 @@ def run_predictions(data, total_ints, current_year, problem_type, metric_to_choo
 def run_best_prediction(data, total_ints, current_year, problem_type, metric_to_choose_best_model, printResults = False):
     train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, test_data_confID = preprocess(data, total_ints, current_year, problem_type)
     models = getModels(problem_type)
-
 
 
     best_model, train_data, test_data = getBestModel(models, train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, test_data_confID, problem_type, metric_to_choose_best_model)
@@ -886,20 +922,20 @@ def run_best_prediction_all_data_options(year, problem_type, metric_to_choose_be
 
 
 def main():
-    #best params: XGBClassifier({'learning_rate': 0.1, 'max_depth': 5, 'n_estimators': 200}, player_averages_number = 
+    #best params: XGBClassifier({'learning_rate': 0.1, 'max_depth': 5, 'n_estimators': 200}, player_averages_number = 1
     pd.set_option('display.max_rows', None)
     problem_type = "Classification"
     metric_to_choose_best_model = "error"
 
-    #run_best_prediction_all_data_options(11, problem_type, metric_to_choose_best_model, True)
+    run_best_prediction_all_data_options(11, problem_type, metric_to_choose_best_model, True)
 
-    data, total_ints = getData(problem_type, 7)
+    #data, total_ints = getData(problem_type, 1)
 
     
 
     #plot_metric_per_features(data, total_ints, 10, problem_type, metric_to_choose_best_model)
 
-    run_best_prediction(data, total_ints, 11, problem_type, metric_to_choose_best_model, True)
+    #run_best_prediction(data, total_ints, 11, problem_type, metric_to_choose_best_model, True)
     #model, train_data, train_data_labels, test_data, test_data_labels, _ = run_best_prediction(data, total_ints, 10, problem_type, metric_to_choose_best_model, True)
 
 
