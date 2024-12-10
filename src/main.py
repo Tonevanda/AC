@@ -66,7 +66,7 @@ def weighted_average_attributes(players_per_team_prev_years_original, players_pe
     current_year_players = players_per_team_year[groupby_attribute]
 
     for player in current_year_players:
-        if player not in all_players_prev_years:
+        if player not in all_players_prev_years and groupby_attribute != 'playerID':
             new_row = pd.DataFrame(
                 {col: 0 for col in attribute_averages.columns}, index=[0]
             )
@@ -78,11 +78,13 @@ def weighted_average_attributes(players_per_team_prev_years_original, players_pe
 
 
 
-def players_per_team_averages(players_per_team, coaches, year, team_info, player_info, coach_info, problem_type):
+def players_per_team_averages(players_per_team, coaches, year, team_info, player_info, coach_info, problem_type, player_averages_number):
     """
     This function calculates the average of the players in each team for a given year, based on the past years.
     If year is 7, it will calculate the averages for the years 1 to 6.
     """
+
+
     players_per_team_year = players_per_team[players_per_team["year"] == year]
     players_per_team_year = players_per_team_year[players_per_team_year['stint'] < 2]
 
@@ -97,6 +99,9 @@ def players_per_team_averages(players_per_team, coaches, year, team_info, player
     coaches_prev_years = coaches_prev_years.drop(columns=['stint'])
     players_per_team_year = players_per_team_year.drop(columns=['stint'])
     coaches_year = coaches_year.drop(columns=['stint'])
+
+    min_num_of_players_per_team_per_year = players_per_team_year.groupby(['tmID', 'year']).size()
+    min_num_of_players_per_team_per_year = min_num_of_players_per_team_per_year.min()
 
 
     player_averages = weighted_average_attributes(players_per_team_prev_years, players_per_team_year, year, player_info, "playerID")
@@ -113,7 +118,20 @@ def players_per_team_averages(players_per_team, coaches, year, team_info, player
 
     players_per_team_year = pd.merge(players_per_team_year, player_averages, how="inner", on="playerID")
 
-    players_per_team_year = players_per_team_year.loc[players_per_team_year.groupby("tmID")["Total"].idxmax()]
+
+
+    #players_per_team_year = players_per_team_year.loc[players_per_team_year.groupby("tmID")["Total"].idxmax()]
+
+    players_per_team_year = players_per_team_year.groupby("tmID", group_keys=False).apply(
+        lambda group: group.nlargest(min(min_num_of_players_per_team_per_year, player_averages_number), "Total")
+    )
+
+    players_per_team_year = players_per_team_year.groupby(["tmID", "year", "playoff"]).mean(numeric_only=True)
+
+    players_per_team_year = players_per_team_year.reset_index()
+
+
+
 
     coach_info_2 = ['won', 'lost', 'post_wins', 'post_losses']
 
@@ -143,6 +161,8 @@ def players_per_team_averages(players_per_team, coaches, year, team_info, player
 
     teams_prev_years = players_per_team_prev_years.drop_duplicates(subset=['tmID', 'year'])
     teams_current_year = players_per_team_year.drop_duplicates(subset=['tmID', 'year'])
+
+
 
 
     
@@ -249,10 +269,15 @@ def fillCompData(teams, coaches, players_teams):
     return coaches, players_teams, teams
 
 
-def getData(problem_type):
+def getData(problem_type, player_averages_number):
     awards_players, coaches, players_teams, players, teams_post, teams, series_post = loadData()
 
+
+
     coaches, players_teams, teams = fillCompData(teams, coaches, players_teams) 
+
+
+
 
     teams['winRatio'] = teams['won'] / (teams['won'] + teams['lost'])
 
@@ -263,7 +288,7 @@ def getData(problem_type):
     if problem_type == "Classification":
         team_info.append('winRatio')
 
-    player_info = ['assists', 'steals', 'rebounds']
+    player_info = ['assists', 'steals', 'rebounds']# 'GP', 'GS', 'minutes', 'points', 'oRebounds', 'dRebounds', 'blocks', 'turnovers', 'PF', 'fgAttempted', 'fgMade', 'ftAttempted', 'ftMade', 'threeAttempted', 'threeMade', 'dq', 'PostGP', 'PostGS', 'PostMinutes', 'PostPoints', 'PostoRebounds', 'PostdRebounds', 'PostRebounds', 'PostAssists', 'PostSteals', 'PostBlocks', 'PostTurnovers', 'PostPF', 'PostfgAttempted', 'PostfgMade', 'PostftAttempted', 'PostftMade', 'PostthreeAttempted', 'PostthreeMade', 'PostDQ']
 
     coach_info = ['coachWinRatio', 'coachPostWinRatio']
 
@@ -290,7 +315,7 @@ def getData(problem_type):
 
     # Calculate the best player stats for each team for each year
     for year in range(2, 12):
-        data = pd.concat([data, players_per_team_averages(players_per_team, coaches, year, team_info, player_info, coach_info, problem_type)])
+        data = pd.concat([data, players_per_team_averages(players_per_team, coaches, year, team_info, player_info, coach_info, problem_type, player_averages_number)])
 
 
     data = rename_attributes(data, player_info)
@@ -715,17 +740,25 @@ def run_best_prediction(data, total_ints, current_year, problem_type, metric_to_
     final_data, model, stats = predict(best_model, train_data, train_data_labels, test_data.copy(), test_data_labels, test_data_tmID, test_data_playoff, test_data_confID, problem_type, "all")
 
     writeAnswerToCsv(final_data)
-
+    return_metric = None
     if printResults:
         print("The " + model.__class__.__name__ + " Predicted:")
         print(final_data)
         for (metric, stat) in stats:
+            if metric == metric_to_choose_best_model:
+                return_metric = float(stat)
             if metric == "f1" or metric == "acc" or metric == "r2" or metric == "auc":
                 print("The " + metric + " is: " + str(stat) + "%")
             else:
                 print("The " + metric + " is: " + str(stat))
+    else:
+        for (metric, stat) in stats:
+            if metric == metric_to_choose_best_model:
+                return_metric = float(stat)
+                break
 
-    return best_model, train_data, train_data_labels, test_data, test_data_labels
+
+    return best_model, train_data, train_data_labels, test_data, test_data_labels, return_metric
 
 
 def plot_roc_curve(model, train_data, train_data_labels, test_data, test_data_labels):
@@ -832,19 +865,42 @@ def writeAnswerToCsv(result):
     result = result.drop(columns=["probabilities"])
     result.to_csv("result.csv", index=False)
 
+def run_best_prediction_all_data_options(year, problem_type, metric_to_choose_best_model, print_results):
+    best_player_averages_number = 1
+    best_metric = -1000
+    if metric_to_choose_best_model == "mae" or metric_to_choose_best_model == "mse" or metric_to_choose_best_model == "error":
+        best_metric = 10000
+    for player_averages_number in range(1, 10):
+        data, total_ints = getData(problem_type, player_averages_number)
+        _, _, _, _, _, metric = run_best_prediction(data, total_ints, year, problem_type, metric_to_choose_best_model, print_results)
+        if metric_to_choose_best_model == "mae" or metric_to_choose_best_model == "mse" or metric_to_choose_best_model == "error" and metric < best_metric:
+            best_player_averages_number = player_averages_number
+            best_metric = metric
+        elif metric_to_choose_best_model != "mae" and metric_to_choose_best_model != "error" and metric_to_choose_best_model != "mse" and metric > best_metric:
+            best_player_averages_number = player_averages_number
+            best_metric = metric
+
+    data, total_ints = getData(problem_type, best_player_averages_number)
+    run_best_prediction(data, total_ints, year, problem_type, metric_to_choose_best_model, True)
+    print("Best player averages number: " + str(best_player_averages_number))
+
+
 def main():
+    #best params: XGBClassifier({'learning_rate': 0.1, 'max_depth': 5, 'n_estimators': 200}, player_averages_number = 
     pd.set_option('display.max_rows', None)
     problem_type = "Classification"
     metric_to_choose_best_model = "error"
 
-    data, total_ints = getData(problem_type)
+    #run_best_prediction_all_data_options(11, problem_type, metric_to_choose_best_model, True)
+
+    data, total_ints = getData(problem_type, 7)
 
     
 
     #plot_metric_per_features(data, total_ints, 10, problem_type, metric_to_choose_best_model)
 
     run_best_prediction(data, total_ints, 11, problem_type, metric_to_choose_best_model, True)
-    #model, train_data, train_data_labels, test_data, test_data_labels = run_best_prediction(data, total_ints, 10, problem_type, metric_to_choose_best_model, True)
+    #model, train_data, train_data_labels, test_data, test_data_labels, _ = run_best_prediction(data, total_ints, 10, problem_type, metric_to_choose_best_model, True)
 
 
     #plot_roc_curve(model, train_data, train_data_labels, test_data, test_data_labels)
