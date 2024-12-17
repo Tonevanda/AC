@@ -429,32 +429,25 @@ def train_predict_classifier(model, x_train, y_train, x_test, y_test, confID):
 
     train_model(model, x_train, y_train)
 
-    train_predictions, train_probabilities, = predict_labels(model, x_train)
-
+    train_predictions, train_probabilities = predict_labels(model, x_train)
     predictions, probabilities = predict_labels(model, x_test)
 
     x_test['probabilities'] = probabilities[:, 1]
     x_test['confID'] = confID
-    x_test['result'] = 'N'
+    x_test['result'] = 0
 
-    top_4_teams = x_test[x_test['confID'] == "EA"].nlargest(4, 'probabilities').index
-    x_test.loc[top_4_teams, 'result'] = 'Y'
+    top_4_teams_ea = x_test[x_test['confID'] == "EA"].nlargest(4, 'probabilities').index
+    x_test.loc[top_4_teams_ea, 'result'] = 1
 
-    top_4_teams = x_test[x_test['confID'] == "WE"].nlargest(4, 'probabilities').index
-    x_test.loc[top_4_teams, 'result'] = 'Y'
+    top_4_teams_we = x_test[x_test['confID'] == "WE"].nlargest(4, 'probabilities').index
+    x_test.loc[top_4_teams_we, 'result'] = 1
 
-    index = 0
-    for [_, win_prob] in probabilities:
-        table_row = x_test.iloc[index]
-        if table_row['result'] == 'Y':
-            probabilities[index][1] = max(0.51, win_prob)
-        else:
-            probabilities[index][1] = min(0.49, win_prob)
-        index += 1
+    probabilities[:, 1] = x_test['result']
 
     x_test = x_test.drop(columns=['confID', 'result', 'probabilities'])
 
     return predictions, probabilities, train_predictions, train_probabilities
+
 
 def evaluate_model(metric, labels, prediction, probability = None):
     if metric == "f1":
@@ -653,13 +646,10 @@ def getBestModel(models, train_data, train_data_labels, test_data, test_data_lab
 def predict(model, train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, test_data_confID, problem_type, metrics):
     stats = []
     if problem_type == "Classification":    
-        predictions, probabilities, _, _, = train_predict_classifier(model, train_data, train_data_labels, test_data, test_data_labels, test_data_confID)
+        predictions, probabilities, _, _ = train_predict_classifier(model, train_data, train_data_labels, test_data, test_data_labels, test_data_confID)
 
-        probabilities_per_team = []
-        final_playoff = []
-        for [_, win_prob] in probabilities:
-            probabilities_per_team.append(win_prob)
-            final_playoff.append('N')
+        probabilities_per_team = probabilities[:, 1]
+        final_playoff = probabilities_per_team
 
         test_data['tmID'] = test_data_tmID
         test_data['playoff'] = test_data_labels.map({1: "Y", 0: "N"})
@@ -669,16 +659,15 @@ def predict(model, train_data, train_data_labels, test_data, test_data_labels, t
         test_data['finalPlayoff'] = final_playoff
         test_data['probabilities'] = probabilities_per_team
 
-        top_4_teams = test_data[test_data['confID'] == "EA"].nlargest(4, 'probabilities').index
-        test_data.loc[top_4_teams, 'finalPlayoff'] = 'Y'
+        top_4_teams_ea = test_data[test_data['confID'] == "EA"].nlargest(4, 'probabilities').index
+        test_data.loc[top_4_teams_ea, 'finalPlayoff'] = 1
 
-        top_4_teams = test_data[test_data['confID'] == "WE"].nlargest(4, 'probabilities').index
-        test_data.loc[top_4_teams, 'finalPlayoff'] = 'Y'
+        top_4_teams_we = test_data[test_data['confID'] == "WE"].nlargest(4, 'probabilities').index
+        test_data.loc[top_4_teams_we, 'finalPlayoff'] = 1
 
+        test_data['finalPlayoff'] = test_data['finalPlayoff'].map({1: "Y", 0: "N"})
 
-        #test_data = test_data.drop(columns=["probabilities"])
         test_data = test_data[['tmID', 'confID', 'playoff', 'predictedPlayoff', 'finalPlayoff', 'probabilities']]
-
 
         if metrics == "all":
             metrics = ["f1", "acc", "error", "auc"]
@@ -689,27 +678,19 @@ def predict(model, train_data, train_data_labels, test_data, test_data_labels, t
             stat = str(evaluate_model(metric, test_data_labels, pred, probabilities))
             stats.append((metric, stat))
     elif problem_type == "Regression":
-
-        #best_model = fine_tune_model(best_model, train_data, train_data_labels)
-
-
         predictions, _ = train_predict_regression(model, train_data, train_data_labels, test_data, test_data_labels)
 
-        
         test_data.loc[:, 'tmID'] = test_data_tmID
         test_data.loc[:, 'winRatio'] = test_data_labels
         test_data.loc[:, 'predictedWinRatio'] = predictions
         test_data.loc[:, 'playoff'] = test_data_playoff
 
         test_data['predictedPlayoff'] = 'N'
-        top_4_teams = test_data[test_data['confID'] == "EA"].nlargest(4, 'predictedWinRatio').index
-        test_data.loc[top_4_teams, 'predictedPlayoff'] = 'Y'
+        top_4_teams_ea = test_data[test_data['confID'] == "EA"].nlargest(4, 'predictedWinRatio').index
+        test_data.loc[top_4_teams_ea, 'predictedPlayoff'] = 'Y'
 
-        top_4_teams = test_data[test_data['confID'] == "WE"].nlargest(4, 'predictedWinRatio').index
-        test_data.loc[top_4_teams, 'predictedPlayoff'] = 'Y'
-
-        '''top_8_teams = test_data.nlargest(8, 'predictedWinRatio').index
-        test_data.loc[top_8_teams, 'predictedPlayoff'] = 'Y'''
+        top_4_teams_we = test_data[test_data['confID'] == "WE"].nlargest(4, 'predictedWinRatio').index
+        test_data.loc[top_4_teams_we, 'predictedPlayoff'] = 'Y'
 
         test_data = test_data[['tmID', 'winRatio', 'predictedWinRatio', 'playoff', 'predictedPlayoff']]
 
