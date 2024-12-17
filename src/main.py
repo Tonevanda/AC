@@ -610,6 +610,7 @@ def getBestModel(models, train_data, train_data_labels, test_data, test_data_lab
         non_default_params = {name: value for name, value in model_params.items() if value != default_params[name]}
         grid_results.append((model.__class__.__name__, non_default_params, stat, metric))
         print(f"{metric} of {str(stat)} for model: {model.__class__.__name__}({non_default_params})")
+        
     best_model = None
     best_train_feat = None
     best_test_feat = None
@@ -919,7 +920,7 @@ def run_best_prediction_all_data_options(year, problem_type, metric_to_choose_be
     best_metric = -1000
     if metric_to_choose_best_model == "mae" or metric_to_choose_best_model == "mse" or metric_to_choose_best_model == "error":
         best_metric = 10000
-    decay_numbers = [0, 0.25, 0.5, 0.75, 1]
+    decay_numbers = [0.01, 0.1, 0.5, 1.0, 2.0]
     for player_averages_number in range(1, 10):
         for decay_number in decay_numbers:
             data, total_ints = getData(problem_type, player_averages_number, decay_number)
@@ -964,12 +965,12 @@ def main():
 
 
 
-    '''model_n = "XGBClassifier"
+    model_n = "XGBClassifier"
     best_stat = 1000000
     for (model_name, params, stat, metric) in grid_results:
         if model_name == model_n and stat < best_stat:
             best_stat = stat
-            print(f"best {metric} of {str(stat)} for best model: {model_name}({params})")'''
+            print(f"best {metric} of {str(stat)} for best model: {model_name}({params})")
     
 
 
