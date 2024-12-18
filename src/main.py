@@ -790,7 +790,6 @@ def run_best_prediction(data, total_ints, current_year, problem_type, metric_to_
     print(train_data.columns)
     final_data, model, stats = predict(best_model, train_data, train_data_labels, test_data.copy(), test_data_labels, test_data_tmID, test_data_playoff, test_data_confID, problem_type, "all")
 
-    writeAnswerToCsv(final_data)
     return_metric = None
     if printResults:
         print("The " + model.__class__.__name__ + " Predicted:")
@@ -910,10 +909,13 @@ def plot_metric_per_features(data, total_ints, current_year, problem_type, metri
     plt.legend().remove()
     plt.show()
 
-def writeAnswerToCsv(result):
-    result = result[["tmID", "probabilities"]]
-    result["Playoff"] = result["probabilities"].round(2)
-    result = result.drop(columns=["probabilities"])
+def writeAnswerToCsv(tmID, probabilities):
+    result = pd.DataFrame(columns=["tmID", "probabilities"])
+    probs = []
+    for [_, win_prob] in probabilities:
+        probs.append(win_prob)
+    result["tmID"] = tmID
+    result["probabilities"] = probs
     result.to_csv("result.csv", index=False)
 
 def run_best_prediction_all_data_options(year, problem_type, metric_to_choose_best_model, print_results):
@@ -972,21 +974,13 @@ def final_predict(problem_type, best_model, year, player_averages_number, decay_
     for index in range(0, len(probabilities)):
         table_row = test_data.iloc[index]
         if table_row["finalPlayoff"] == 1:
-            adjusted_probs.append([0, 1])
+            adjusted_probs.append([0.00, 1.00])
         else:
-            adjusted_probs.append([1,0])
+            adjusted_probs.append([1.00,0.00])
         #adjusted_probs.append(win_prob)
         index += 1
-    index = 0
-    '''for [_, win_prob] in probabilities:
-        table_row = test_data.iloc[index]
-        if table_row["finalPlayoff"] == 1 and win_prob <= 0.5:
-            probabilities[index][1] = 0.51
-        elif table_row["finalPlayoff"] == 0 and win_prob >= 0.5:
-            probabilities[index][1] = 0.49
-
-        index += 1'''
     
+    writeAnswerToCsv(test_data_tmID, adjusted_probs)
     return evaluate_model("error", test_data_labels, predictions, adjusted_probs)
 
 
