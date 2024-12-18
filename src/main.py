@@ -579,7 +579,7 @@ def getModels(problem_type):
     if problem_type == "Regression":
         return [get_model("LinearRegression"), DecisionTreeRegressor(random_state=42), RandomForestRegressor(random_state=42), SVR(), xgb.XGBRegressor(), MLPRegressor(random_state=42)]
     elif problem_type == "Classification":
-        return [xgb.XGBClassifier()]#[LogisticRegression(random_state=42), SVC(random_state=912, kernel='linear', probability=True), xgb.XGBClassifier(), MLPClassifier(random_state=42)]
+        return [xgb.XGBClassifier(), LogisticRegression(random_state=42), SVC(random_state=912, kernel='linear', probability=True), xgb.XGBClassifier(), MLPClassifier(random_state=42)]
 
 def get_model(model_name, getDefault = True):
     if getDefault:
@@ -1001,23 +1001,12 @@ def main():
     player_averages_number = 1
     decay_number = 0.1
 
-    
-    '''data, total_ints = getData(problem_type, 1, 0.1)
-    train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, test_data_confID = preprocess(data, total_ints, 11, problem_type)
-
-    model = xgb.XGBClassifier()
-    train_model(model, train_data, train_data_labels)
-
-    print(final_predict(problem_type, model, 11, 1, 0.1, train_data.columns))
-
-    
-    player_averages_num = 1
-    decay_number = 0.1'''
 
 
     data, total_ints = getData(problem_type, player_averages_number, decay_number)
     best_model, train_data, _, _, _, _  = run_best_prediction(data, total_ints, 10, problem_type, metric_to_choose_best_model, True)
     #print(train_data.columns)
+    print(str(best_model))
     error = final_predict(problem_type, best_model, 11, player_averages_number, decay_number, train_data.columns)
     print(error)
     #model, train_data, train_data_labels, test_data, test_data_labels, _ = run_best_prediction(data, total_ints, 10, problem_type, metric_to_choose_best_model, True)
