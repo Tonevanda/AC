@@ -945,9 +945,10 @@ def final_predict(problem_type, best_model, year, player_averages_number, decay_
     data, total_ints = getData(problem_type, player_averages_number, decay_number)
     
     train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, test_data_confID = preprocess(data, total_ints, year, problem_type)
-    #train_data = train_data[['d_ftm', 'coachPostWinRatio']]
+    train_data = train_data[features_to_keep]
     #test_data = test_data[['d_ftm', 'coachPostWinRatio']]
     test_data = test_data[features_to_keep]
+    train_model(best_model, train_data, train_data_labels)
     predictions, probabilities = predict_labels(best_model, test_data)#train_predict_classifier(model, train_data, train_data_labels, test_data, test_data_labels, test_data_confID)
 
     probabilities_per_team = probabilities[:, 1]
@@ -976,8 +977,17 @@ def final_predict(problem_type, best_model, year, player_averages_number, decay_
             adjusted_probs.append([1,0])
         #adjusted_probs.append(win_prob)
         index += 1
+    index = 0
+    '''for [_, win_prob] in probabilities:
+        table_row = test_data.iloc[index]
+        if table_row["finalPlayoff"] == 1 and win_prob <= 0.5:
+            probabilities[index][1] = 0.51
+        elif table_row["finalPlayoff"] == 0 and win_prob >= 0.5:
+            probabilities[index][1] = 0.49
+
+        index += 1'''
     
-    return evaluate_model("error", test_data_labels, predictions, probabilities)
+    return evaluate_model("error", test_data_labels, predictions, adjusted_probs)
 
 
 def main():
@@ -988,38 +998,22 @@ def main():
 
     #run_best_prediction_all_data_options(10, problem_type, metric_to_choose_best_model, True)
 
-    #player_averages_number = 3
-    #decay_number = 1
-
-    
-
-    
-    '''player_averages_choices = [1]
-    decay_number = -1
-    decay_choices = [-1]
-    player_averages_number = 1
-
-    #plot_metric_per_features(data, total_ints, 10, problem_type, metric_to_choose_best_model)
-    best_player_averages_num = 0
-    best_decay_choice = 0
-    best_error = 10000
-    while True:
-        data, total_ints = getData(problem_type, player_averages_number, decay_number)
-        best_model, train_data, _, _, _, _  = run_best_prediction(data, total_ints, 9, problem_type, metric_to_choose_best_model, True)
-        #print(train_data.columns)
-        error = final_predict(problem_type, best_model, 10, player_averages_number, decay_number, train_data.columns)
-        if error < best_error:
-            best_error = error
-            best_player_averages_num = player_averages_number
-            best_decay_choice = decay_number
-        decay_number += 0.01
-        print("Best result till now:")
-        print(best_error, best_decay_choice, best_player_averages_num)
-
-    print(best_decay_choice, best_player_averages_num, best_error)'''
-
     player_averages_number = 1
     decay_number = 0.1
+
+    
+    '''data, total_ints = getData(problem_type, 1, 0.1)
+    train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, test_data_confID = preprocess(data, total_ints, 11, problem_type)
+
+    model = xgb.XGBClassifier()
+    train_model(model, train_data, train_data_labels)
+
+    print(final_predict(problem_type, model, 11, 1, 0.1, train_data.columns))
+
+    
+    player_averages_num = 1
+    decay_number = 0.1'''
+
 
     data, total_ints = getData(problem_type, player_averages_number, decay_number)
     best_model, train_data, _, _, _, _  = run_best_prediction(data, total_ints, 10, problem_type, metric_to_choose_best_model, True)
