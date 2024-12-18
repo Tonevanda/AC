@@ -421,11 +421,13 @@ def train_predict_regression(model, x_train, y_train, x_test, y_test):
 
     return predictions, train_predictions
 
+def predict_labels(model, features):
+    predictions = model.predict(features)
+    probabilities = model.predict_proba(features)
+    return predictions, probabilities
+
 def train_predict_classifier(model, x_train, y_train, x_test, y_test, confID):
-    def predict_labels(model, features):
-        predictions = model.predict(features)
-        probabilities = model.predict_proba(features)
-        return predictions, probabilities
+
 
     train_model(model, x_train, y_train)
 
@@ -434,15 +436,22 @@ def train_predict_classifier(model, x_train, y_train, x_test, y_test, confID):
 
     x_test['probabilities'] = probabilities[:, 1]
     x_test['confID'] = confID
-    x_test['result'] = 0
+    x_test['result'] = 'N'
 
-    top_4_teams_ea = x_test[x_test['confID'] == "EA"].nlargest(4, 'probabilities').index
-    x_test.loc[top_4_teams_ea, 'result'] = 1
+    top_4_teams = x_test[x_test['confID'] == "EA"].nlargest(4, 'probabilities').index
+    x_test.loc[top_4_teams, 'result'] = 'Y'
 
-    top_4_teams_we = x_test[x_test['confID'] == "WE"].nlargest(4, 'probabilities').index
-    x_test.loc[top_4_teams_we, 'result'] = 1
+    top_4_teams = x_test[x_test['confID'] == "WE"].nlargest(4, 'probabilities').index
+    x_test.loc[top_4_teams, 'result'] = 'Y'
 
-    probabilities[:, 1] = x_test['result']
+    index = 0
+    for [_, win_prob] in probabilities:
+        table_row = x_test.iloc[index]
+        if table_row['result'] == 'Y':
+            probabilities[index][1] = max(0.51, win_prob)
+        else:
+            probabilities[index][1] = min(0.49, win_prob)
+        index += 1
 
     x_test = x_test.drop(columns=['confID', 'result', 'probabilities'])
 
@@ -505,6 +514,8 @@ def forward_selection(model, original_train_data, original_test_data, train_data
         if (metric == "error" or metric == "mae" or metric == "mse") and stat < best_stat:
             best_stat = stat
             best_columns = new_columns
+            print(new_columns)
+            print(fit.ranking_)
         elif metric != "error" and metric != "mae" and metric != "mse" and stat > best_stat:
             best_stat = stat
             best_columns = new_columns
@@ -643,13 +654,21 @@ def getBestModel(models, train_data, train_data_labels, test_data, test_data_lab
 
 
 
-def predict(model, train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, test_data_confID, problem_type, metrics):
+def predict(model, train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, test_data_confID, problem_type, metrics, withoutTrain = False):
     stats = []
     if problem_type == "Classification":    
-        predictions, probabilities, _, _ = train_predict_classifier(model, train_data, train_data_labels, test_data, test_data_labels, test_data_confID)
+        if not withoutTrain:
+            predictions, probabilities, _, _ = train_predict_classifier(model, train_data, train_data_labels, test_data, test_data_labels, test_data_confID)
+        else:
+            predictions, probabilities = predict_labels(model, test_data)#train_predict_classifier(model, train_data, train_data_labels, test_data, test_data_labels, test_data_confID)
 
-        probabilities_per_team = probabilities[:, 1]
-        final_playoff = probabilities_per_team
+
+        probabilities_per_team = []
+        final_playoff = []
+        for [_, win_prob] in probabilities:
+            probabilities_per_team.append(win_prob)
+            final_playoff.append('N')
+
 
         test_data['tmID'] = test_data_tmID
         test_data['playoff'] = test_data_labels.map({1: "Y", 0: "N"})
@@ -659,13 +678,15 @@ def predict(model, train_data, train_data_labels, test_data, test_data_labels, t
         test_data['finalPlayoff'] = final_playoff
         test_data['probabilities'] = probabilities_per_team
 
-        top_4_teams_ea = test_data[test_data['confID'] == "EA"].nlargest(4, 'probabilities').index
-        test_data.loc[top_4_teams_ea, 'finalPlayoff'] = 1
+        top_4_teams = test_data[test_data['confID'] == "EA"].nlargest(4, 'probabilities').index
+        test_data.loc[top_4_teams, 'finalPlayoff'] = 'Y'
 
-        top_4_teams_we = test_data[test_data['confID'] == "WE"].nlargest(4, 'probabilities').index
-        test_data.loc[top_4_teams_we, 'finalPlayoff'] = 1
+        top_4_teams = test_data[test_data['confID'] == "WE"].nlargest(4, 'probabilities').index
+        test_data.loc[top_4_teams, 'finalPlayoff'] = 'Y'
 
-        test_data['finalPlayoff'] = test_data['finalPlayoff'].map({1: "Y", 0: "N"})
+        #print(test_data['finalPlayoff'])
+
+        #test_data['finalPlayoff'] = test_data['finalPlayoff'].map({1: "Y", 0: "N"})
 
         test_data = test_data[['tmID', 'confID', 'playoff', 'predictedPlayoff', 'finalPlayoff', 'probabilities']]
 
@@ -766,7 +787,7 @@ def run_best_prediction(data, total_ints, current_year, problem_type, metric_to_
 
     best_model, train_data, test_data = getBestModel(models, train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, test_data_confID, problem_type, metric_to_choose_best_model)
 
-
+    print(train_data.columns)
     final_data, model, stats = predict(best_model, train_data, train_data_labels, test_data.copy(), test_data_labels, test_data_tmID, test_data_playoff, test_data_confID, problem_type, "all")
 
     writeAnswerToCsv(final_data)
@@ -920,21 +941,91 @@ def run_best_prediction_all_data_options(year, problem_type, metric_to_choose_be
     print("Best player averages number: " + str(best_player_averages_number) + " and best decay number: " + str(best_decay_number))
 
 
+def final_predict(problem_type, best_model, year, player_averages_number, decay_number, features_to_keep):
+    data, total_ints = getData(problem_type, player_averages_number, decay_number)
+    
+    train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, test_data_confID = preprocess(data, total_ints, year, problem_type)
+    #train_data = train_data[['d_ftm', 'coachPostWinRatio']]
+    #test_data = test_data[['d_ftm', 'coachPostWinRatio']]
+    test_data = test_data[features_to_keep]
+    predictions, probabilities = predict_labels(best_model, test_data)#train_predict_classifier(model, train_data, train_data_labels, test_data, test_data_labels, test_data_confID)
+
+    probabilities_per_team = probabilities[:, 1]
+    final_playoff = probabilities_per_team
+
+    test_data['tmID'] = test_data_tmID
+    test_data['confID'] = test_data_confID
+    test_data['finalPlayoff'] = final_playoff
+    test_data['probabilities'] = probabilities_per_team
+
+    top_4_teams_ea = test_data[test_data['confID'] == "EA"].nlargest(4, 'probabilities').index
+    test_data.loc[top_4_teams_ea, 'finalPlayoff'] = 1
+
+    top_4_teams_we = test_data[test_data['confID'] == "WE"].nlargest(4, 'probabilities').index
+    test_data.loc[top_4_teams_we, 'finalPlayoff'] = 1
+
+
+    adjusted_probs = []
+    print(test_data)
+
+    for index in range(0, len(probabilities)):
+        table_row = test_data.iloc[index]
+        if table_row["finalPlayoff"] == 1:
+            adjusted_probs.append([0, 1])
+        else:
+            adjusted_probs.append([1,0])
+        #adjusted_probs.append(win_prob)
+        index += 1
+    
+    return evaluate_model("error", test_data_labels, predictions, probabilities)
+
+
 def main():
-    #best params: XGBClassifier({'learning_rate': 0.1, 'max_depth': 5, 'n_estimators': 200}, player_averages_number = 3  #decay number 1
+    #best params: XGBClassifier({'learning_rate': 0.1, 'max_depth': 5, 'n_estimators': 200}, player_averages_number = 1 # decay 0.1
     pd.set_option('display.max_rows', None)
     problem_type = "Classification"
     metric_to_choose_best_model = "error"
 
-    #run_best_prediction_all_data_options(11, problem_type, metric_to_choose_best_model, True)
+    #run_best_prediction_all_data_options(10, problem_type, metric_to_choose_best_model, True)
 
-    data, total_ints = getData(problem_type, 3, 1)
+    #player_averages_number = 3
+    #decay_number = 1
 
     
 
-    #plot_metric_per_features(data, total_ints, 10, problem_type, metric_to_choose_best_model)
+    
+    '''player_averages_choices = [1]
+    decay_number = -1
+    decay_choices = [-1]
+    player_averages_number = 1
 
-    run_best_prediction(data, total_ints, 11, problem_type, metric_to_choose_best_model, True)
+    #plot_metric_per_features(data, total_ints, 10, problem_type, metric_to_choose_best_model)
+    best_player_averages_num = 0
+    best_decay_choice = 0
+    best_error = 10000
+    while True:
+        data, total_ints = getData(problem_type, player_averages_number, decay_number)
+        best_model, train_data, _, _, _, _  = run_best_prediction(data, total_ints, 9, problem_type, metric_to_choose_best_model, True)
+        #print(train_data.columns)
+        error = final_predict(problem_type, best_model, 10, player_averages_number, decay_number, train_data.columns)
+        if error < best_error:
+            best_error = error
+            best_player_averages_num = player_averages_number
+            best_decay_choice = decay_number
+        decay_number += 0.01
+        print("Best result till now:")
+        print(best_error, best_decay_choice, best_player_averages_num)
+
+    print(best_decay_choice, best_player_averages_num, best_error)'''
+
+    player_averages_number = 1
+    decay_number = 0.1
+
+    data, total_ints = getData(problem_type, player_averages_number, decay_number)
+    best_model, train_data, _, _, _, _  = run_best_prediction(data, total_ints, 10, problem_type, metric_to_choose_best_model, True)
+    #print(train_data.columns)
+    error = final_predict(problem_type, best_model, 11, player_averages_number, decay_number, train_data.columns)
+    print(error)
     #model, train_data, train_data_labels, test_data, test_data_labels, _ = run_best_prediction(data, total_ints, 10, problem_type, metric_to_choose_best_model, True)
 
 
@@ -946,12 +1037,12 @@ def main():
 
 
 
-    model_n = "XGBClassifier"
+    '''model_n = "XGBClassifier"
     best_stat = 1000000
     for (model_name, params, stat, metric) in grid_results:
         if model_name == model_n and stat < best_stat:
             best_stat = stat
-            print(f"best {metric} of {str(stat)} for best model: {model_name}({params})")
+            print(f"best {metric} of {str(stat)} for best model: {model_name}({params})")'''
     
 
 
