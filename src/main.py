@@ -593,28 +593,21 @@ def grid_search_model(model, train_data, train_data_labels):
         
         
 
-    parameter_xgb = {
-        'n_estimators': [50, 100, 200],         # Number of boosting rounds (trees)
-        'learning_rate': [0.01, 0.05, 0.1, 0.3],     # Step size (learning rate)
-        'max_depth': [3, 5, 6, 7],                  # Maximum depth of each tree
-        'min_child_weight': [1, 2, 5],            # Minimum sum of instance weight in a child
-        'subsample': [0.7, 0.8, 0.9, 1.0],       # Fraction of data for each tree
-        'colsample_bytree': [0.7, 0.8, 0.9, 1.0], # Fraction of features for each tree
-        'gamma': [0, 0.1, 0.2],                 # Minimum loss reduction for splitting
-        'reg_alpha': [0, 0.01, 0.1],             # L1 regularization term
-        'reg_lambda': [0, 0.01, 0.1, 1.0],            # L2 regularization term
-        'scale_pos_weight': [1, 10, 50],          # Balance class weights for imbalanced data
+    parameter_svr = {
+        "C": [0.1, 1],
+        "epsilon": [0.1, 0.5],         
+        "kernel": ["linear", "poly"]
     }
-    parameter_dict = {"XGBClassifier": parameter_xgb}
+    parameter_dict = {}
 
-    if model.__class__.__name__ not in parameter_dict or True:
+    if model.__class__.__name__ not in parameter_dict:
         print("parameters for " + model.__class__.__name__ + " do not exist")
         return None
 
     model_params = parameter_dict[model.__class__.__name__]
 
 
-    scorer = make_scorer(f1_score)
+    scorer = make_scorer(mean_absolute_error)
 
     grid_obj = GridSearchCV(
         estimator=model,
@@ -631,7 +624,7 @@ def grid_search_model(model, train_data, train_data_labels):
     cv_results = grid_obj.cv_results_
     models_tested = cv_results['params']
 
-    models = [model]
+    models = []
     for model_params in models_tested:
         model_tested = clone(model)
         model_tested.set_params(**model_params)
@@ -643,21 +636,27 @@ def grid_search_model(model, train_data, train_data_labels):
 
 
 
-def getBestClassificationModelFeaturesParams(data, total_ints, current_year, metric):
+def getBestClassificationModelFeaturesParams(data, total_ints, current_year, metric, model = None):
     #preprocess the data
     train_data, train_data_labels, test_data, test_data_labels, _, _, test_data_confID = preprocess(data, total_ints, current_year, "Classification")
 
     #initialize variables
     best_model = None
     best_features = None
+    best_metric_per_features = None
     best_stat = -1000000
     if metric == "error":
         best_stat = 100000000
 
+    if model != None:
+        models = [model]
+    else:
+        models = getClassificationModels()
+
     for model in getClassificationModels():
         print("Forward Selectioning " + model.__class__.__name__)
         #do forward selection to obtain the best features
-        features, _ = forward_selection_classifier(model, train_data, train_data_labels, test_data, test_data_labels, metric, test_data_confID)
+        features, metric_per_feature = forward_selection_classifier(model, train_data, train_data_labels, test_data, test_data_labels, metric, test_data_confID)
 
         #assign the best features to the training and test data
         train_copy = train_data.copy()
@@ -672,29 +671,43 @@ def getBestClassificationModelFeaturesParams(data, total_ints, current_year, met
             best_stat = stat
             best_model = model
             best_features = features
+            best_metric_per_features = metric_per_feature
         elif metric != "error" and stat > best_stat:
             best_stat = stat
             best_model = model
             best_features = features
+            best_metric_per_features = metric_per_feature
 
-    return best_model, best_features
+    return best_model, best_features, best_metric_per_features
 
 
-def getBestRegressionModelFeaturesParams(data, total_ints, current_year, metric):
+def getBestRegressionModelFeaturesParams(data, total_ints, current_year, metric, model = None):
     #preprocess the data
     train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, test_data_confID = preprocess(data, total_ints, current_year, "Regression")
 
     #initialize variables
     best_model = None
     best_features = None
+    best_metric_per_feature = None
     best_stat = -1000000
     if metric == "mse" or metric == "mae":
         best_stat = 100000000
 
-    for model in getRegressionModels():
+    if model == None:
+        models = getRegressionModels()
+    else:
+        models = [model]
+    models_length = len(models)
+    for i in range(0, models_length):
+        grid_models = grid_search_model(models[i], train_data, train_data_labels)
+        if grid_models != None:
+            models.extend(grid_models)
+
+    for model in models:
+
         print("Forward Selectioning " + model.__class__.__name__)
         #do forward selection to obtain the best features
-        features, _ = forward_selection_regressor(model, train_data, train_data_labels, test_data, test_data_labels, metric)
+        features, metric_per_feature = forward_selection_regressor(model, train_data, train_data_labels, test_data, test_data_labels, metric)
 
         #assign the best features to the training and test data
         train_copy = train_data.copy()
@@ -709,12 +722,14 @@ def getBestRegressionModelFeaturesParams(data, total_ints, current_year, metric)
             best_stat = stat
             best_model = model
             best_features = features
+            best_metric_per_feature = metric_per_feature
         elif metric != "mae" and metric != "mse" and stat > best_stat:
             best_stat = stat
             best_model = model
             best_features = features
+            best_metric_per_feature = metric_per_feature
 
-    return best_model, best_features
+    return best_model, best_features, best_metric_per_feature
 
 
 
@@ -771,11 +786,12 @@ def run_predictions(data, total_ints, current_year, problem_type, metric_to_choo
     
 
 
+def plot_roc_curve_classification(model, metric, year):
+    _, table_data, _, _, _ = run_prediction_classifier(metric, year, model)
+    test_data_labels = table_data['playoff'].map({'Y':1, 'N':0})
+    probabilities = table_data['finalPlayoff']
 
-def plot_roc_curve(model, train_data, train_data_labels, test_data, test_data_labels, confID):
-    '''_, probabilities, _, _ = train_predict_classifier(model, train_data, train_data_labels, test_data, test_data_labels, confID)
-
-    fpr, tpr, _ = roc_curve(test_data_labels, probabilities[:, 1])
+    fpr, tpr, _ = roc_curve(test_data_labels, probabilities)
 
     roc_plot = pd.DataFrame({
         "Curve": tpr
@@ -790,7 +806,30 @@ def plot_roc_curve(model, train_data, train_data_labels, test_data, test_data_la
     plt.title("ROC Curve of " + model.__class__.__name__)
     plt.tight_layout()
     plt.legend().remove()
-    plt.show()'''
+    plt.show()
+
+
+def plot_roc_curve_regression(model, metric, year):
+    _, table_data, _, _, _ = run_prediction_regressor(metric, year, model)
+    test_data_labels = table_data['playoff'].map({'Y':1, 'N':0})
+    probabilities = table_data['finalPlayoff']
+
+    fpr, tpr, _ = roc_curve(test_data_labels, probabilities)
+
+    roc_plot = pd.DataFrame({
+        "Curve": tpr
+    })
+
+    roc_plot.index = fpr
+
+
+    roc_plot.plot(kind="line")
+    plt.xlabel('False Positive Rate')
+    plt.ylabel("True Positive Rate")
+    plt.title("ROC Curve of " + model.__class__.__name__)
+    plt.tight_layout()
+    plt.legend().remove()
+    plt.show()
 
 
 def plot_data_balance(data):
@@ -867,7 +906,7 @@ def writeAnswerToCsv(tmID, probabilities):
 
 
 #runs prediction given a year
-def run_prediction_regressor(metric_to_choose_best_model, year):
+def run_prediction_regressor(metric_to_choose_best_model, year, model = None):
     def roundProbabilities(test_data, predictions):
         top_4_teams_ea = test_data[test_data['confID'] == "EA"].nlargest(4, 'predictions').index
         test_data.loc[top_4_teams_ea, 'finalPlayoff'] = 1
@@ -889,7 +928,7 @@ def run_prediction_regressor(metric_to_choose_best_model, year):
     
     data, total_ints = getData("Regression", 1, 0.1)
     #Get the best model the training data used for the training of the years before the last year and the testing data is the year before the current one.
-    best_model, best_features = getBestRegressionModelFeaturesParams(data, total_ints, year-1, metric_to_choose_best_model)
+    best_model, best_features, metric_per_feature = getBestRegressionModelFeaturesParams(data, total_ints, year-1, metric_to_choose_best_model, model)
 
     #preprocess this years data
     train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, test_data_confID = preprocess(data, total_ints, year, "Regression")
@@ -916,11 +955,13 @@ def run_prediction_regressor(metric_to_choose_best_model, year):
     probabilities = roundProbabilities(test_data, predictions)
     print("the best model " + str(best_model.__class__.__name__))
     print(test_data)
+
+    writeAnswerToCsv(test_data['tmID'], probabilities)
     #return the models performance
-    return evaluate_model("error", test_data_playoff.map({'Y': 1, 'N': 0}), predictions, probabilities)
+    return best_model, test_data, best_features, metric_per_feature, evaluate_model("error", test_data_playoff.map({'Y': 1, 'N': 0}), predictions, probabilities)
 
 
-def run_prediction_classifier(metric_to_choose_best_model, year):
+def run_prediction_classifier(metric_to_choose_best_model, year, model = None):
     def roundProbabilities(test_data, probabilities):
         top_4_teams_ea = test_data[test_data['confID'] == "EA"].nlargest(4, 'probabilities').index
         test_data.loc[top_4_teams_ea, 'finalPlayoff'] = 1
@@ -943,7 +984,7 @@ def run_prediction_classifier(metric_to_choose_best_model, year):
     data, total_ints = getData("Classification", 1, 0.1)
 
     #Get the best model the training data used for the training of the years before the last year and the testing data is the year before the current one.
-    best_model, best_features = getBestClassificationModelFeaturesParams(data, total_ints, year-1, metric_to_choose_best_model)
+    best_model, best_features, metric_per_feature = getBestClassificationModelFeaturesParams(data, total_ints, year-1, metric_to_choose_best_model, model)
 
 
     #preprocess this years data
@@ -974,7 +1015,7 @@ def run_prediction_classifier(metric_to_choose_best_model, year):
     print(test_data)
 
     #return the models performance
-    return evaluate_model("error", test_data_labels, predictions, probabilities)
+    return best_model, test_data, best_features, metric_per_feature, evaluate_model("error", test_data_labels, predictions, probabilities)
 
 
 
@@ -985,7 +1026,9 @@ def main():
 
     #print(run_prediction_classifier("error", 11))
     
-    print(run_prediction_regressor("mae", 11))
+    best_model, table_data, best_features, metric_per_feature, error = run_prediction_regressor("mae", 10)
+    plot_roc_curve_regression(best_model, "mae", 10)
+    print(error)
 
 
 
