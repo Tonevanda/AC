@@ -120,7 +120,6 @@ def players_per_team_averages(players_per_team, coaches, year, team_info, player
 
 
 
-    #players_per_team_year = players_per_team_year.loc[players_per_team_year.groupby("tmID")["Total"].idxmax()]
 
     players_per_team_year = players_per_team_year.groupby("tmID", group_keys=False).apply(
         lambda group: group.nlargest(min(min_num_of_players_per_team_per_year, player_averages_number), "Total")
@@ -260,7 +259,7 @@ def fillCompData(problem_type, teams, coaches, players_teams):
 
     coachesComp, players_per_team_Comp, teamsComp = loadDataComp()
     
-    teamsComp['playoff'] = ['Y', 'N', 'Y', 'Y', 'N', 'Y', 'Y', 'Y', 'Y', 'Y', 'N', 'N']
+    teamsComp['playoff'] = 'Y'
     if problem_type == "Regression":
         teamsComp['winRatio'] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     
@@ -466,7 +465,7 @@ def evaluate_model(metric, labels, prediction, probability = None):
     elif metric == "acc":
         return (sum(labels == prediction) / len(prediction)) * 100.0
     elif metric == "auc":
-        fpr, tpr, _ = roc_curve(labels, probability[:, 1])
+        fpr, tpr, _ = roc_curve(labels, [prob[1] for prob in probability])
         return auc(fpr, tpr) * 100.0
     elif metric == "error":
         return calculate_error(probability, labels)
@@ -596,9 +595,9 @@ def grid_search_model(model, train_data, train_data_labels):
     parameter_svr = {
         "C": [0.1, 1],
         "epsilon": [0.1, 0.5],         
-        "kernel": ["linear", "poly"]
+        "kernel": ["linear", "rbf"]
     }
-    parameter_dict = {}
+    parameter_dict = {"SVR": parameter_svr}
 
     if model.__class__.__name__ not in parameter_dict:
         print("parameters for " + model.__class__.__name__ + " do not exist")
@@ -790,35 +789,14 @@ def cross_validation_classification():
 
 
 
-def run_predictions(data, total_ints, current_year, problem_type, metric_to_choose_best_model, printResults = False):
-    original_train_data, train_data_labels, original_test_data, test_data_labels, test_data_tmID, test_data_playoff, test_data_confID = preprocess(data, total_ints, current_year, problem_type)
-
-    results = []
-    for model in getClassificationModels():
-        '''train_data, test_data, _ = forward_selection_classifier(model, original_train_data, train_data_labels, original_test_data, test_data_labels, metric_to_choose_best_model, test_data_confID)
-        final_data, model, stats = predict(model, train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, test_data_confID, problem_type, "all")
-        results.append((model, final_data, stats))
-        if printResults:
-            print("The " + model.__class__.__name__ + " Predicted:")
-            print(final_data)
-            for (metric, stat) in stats:
-                if metric == "f1" or metric == "acc" or metric == "r2" or metric == "auc":
-                    print("The " + metric + " is: " + str(stat) + "%")
-                else:
-                    print("The " + metric + " is: " + str(stat))'''
-
-
-
-    return results
     
 
 
 def plot_roc_curve_classification(model, metric, year):
     _, table_data, _, _, _ = run_prediction_classifier(metric, year, model)
-    test_data_labels = table_data['playoff'].map({'Y':1, 'N':0})
-    probabilities = table_data['finalPlayoff']
+    probabilities = table_data["probabilities"]
 
-    fpr, tpr, _ = roc_curve(test_data_labels, probabilities)
+    fpr, tpr, _ = roc_curve(table_data['playoff'], probabilities)
 
     roc_plot = pd.DataFrame({
         "Curve": tpr
@@ -883,29 +861,21 @@ def plot_data_balance(data):
     plt.show()
 
 
-def plot_metric_per_features(data, total_ints, current_year, problem_type, metric_to_choose_best_model):
-    '''train_data, train_data_labels, test_data, test_data_labels, test_data_tmID, test_data_playoff, test_data_confID = preprocess(data, total_ints, current_year, problem_type)
+def plot_metric_per_features_regression(year, metric_to_choose_best_model):
+    best_model, _, _, metric_per_feature, _ = run_prediction_regressor(metric_to_choose_best_model, year)
 
-    if problem_type == "Classification":
-        model = xgb.XGBClassifier()
-    elif problem_type == "Regression":
-        model = MLPRegressor()
-
-    print(test_data.columns)
-    train_data, test_data, metric_per_feature = forward_selection(model, train_data, train_data_labels, test_data, test_data_labels, metric_to_choose_best_model, test_data_confID)
-    print(test_data.columns)
     metrics = []
-    feature_nums = []
-    for (metric, num_feature) in metric_per_feature:
+    number_features = []
+    for (metric, features) in metric_per_feature:
         metrics.append(metric)
-        feature_nums.append(num_feature)
+        number_features.append(len(features))
 
 
     metric_per_feature_plot = pd.DataFrame({
         "MetricPerFeature": metrics
     })
 
-    metric_per_feature_plot.index = feature_nums
+    metric_per_feature_plot.index = number_features
 
 
 
@@ -913,10 +883,48 @@ def plot_metric_per_features(data, total_ints, current_year, problem_type, metri
     metric_per_feature_plot.plot(kind="line")
     plt.xlabel('Number of Features')
     plt.ylabel("Theoretical Best Error")
-    plt.title("Theoretical Best Error per Number of Features using " + model.__class__.__name__ + " for year 10")
+    plt.title("Theoretical Best Error per Number of Features using " + best_model.__class__.__name__ + " for year 10")
     plt.tight_layout()
     plt.legend().remove()
-    plt.show()'''
+    plt.show()
+
+
+def chooseBestDataParamsRegression():
+    decays = [0.1, 0.5, 0.75, 1]
+    num_players = [1, 5, 9]
+
+    best_error = 10000
+    best_decay = 0.1
+    best_num_player = 1
+    for num_player in num_players:
+        for decay in decays:
+            _, _, _, _, error = run_prediction_regressor("mae", 10, None, decay, num_player)
+            if error < best_error:
+                best_error = error
+                best_decay = decay
+                best_num_player = num_player
+
+    print("Best error " + str(best_error) + " with decay " + str(best_decay) + " with best num of players " + str(best_num_player))
+
+
+def chooseBestDataParamsClassification():
+    decays = [0.1, 0.5, 0.75, 1]
+    num_players = [1, 5, 9]
+
+    best_error = 10000
+    best_decay = 0.1
+    best_num_player = 1
+    for num_player in num_players:
+        for decay in decays:
+            _, _, _, _, error = run_prediction_classifier("error", 10, None, decay, num_player)
+            if error < best_error:
+                best_error = error
+                best_decay = decay
+                best_num_player = num_player
+
+    print("Best error " + str(best_error) + " with decay " + str(best_decay) + " with best num of players " + str(best_num_player))
+
+
 
 def writeAnswerToCsv(tmID, probabilities):
     result = pd.DataFrame(columns=["tmID", "probabilities"])
@@ -932,8 +940,11 @@ def writeAnswerToCsv(tmID, probabilities):
 
 
 
+
+
+
 #runs prediction given a year
-def run_prediction_regressor(metric_to_choose_best_model, year, model = None):
+def run_prediction_regressor(metric_to_choose_best_model, year, model = None, decay = 0.1, num_players = 1):
     def roundProbabilities(test_data, predictions):
         top_4_teams_ea = test_data[test_data['confID'] == "EA"].nlargest(4, 'predictions').index
         test_data.loc[top_4_teams_ea, 'finalPlayoff'] = 1
@@ -953,7 +964,7 @@ def run_prediction_regressor(metric_to_choose_best_model, year, model = None):
         return probabilities
     
     
-    data, total_ints = getData("Regression", 1, 0.1)
+    data, total_ints = getData("Regression", num_players, decay)
     #Get the best model the training data used for the training of the years before the last year and the testing data is the year before the current one.
     best_model, best_features, metric_per_feature = getBestRegressionModelFeaturesParams(data, total_ints, year-1, metric_to_choose_best_model, model)
 
@@ -983,12 +994,24 @@ def run_prediction_regressor(metric_to_choose_best_model, year, model = None):
     print("the best model " + str(best_model.__class__.__name__))
     print(test_data)
 
+    test_data_playoff_mapped = test_data_playoff.map({'Y': 1, 'N': 0})
+
+
+    print("F1: " + str(evaluate_model("f1", test_data_playoff_mapped, test_data["finalPlayoff"], probabilities)) + "%")
+    print("Accuracy: " + str(evaluate_model("acc", test_data_playoff_mapped, test_data["finalPlayoff"], probabilities)) + "%")
+    print("AUC: " + str(evaluate_model("auc", test_data_playoff_mapped, test_data["finalPlayoff"], probabilities)) + "%")
+    print("Error: " + str(evaluate_model("error", test_data_playoff_mapped, test_data["finalPlayoff"], probabilities)))
+    print("MAE: " + str(evaluate_model("mae", test_data_playoff_mapped, test_data["finalPlayoff"], probabilities)))
+    print("MSE: " + str(evaluate_model("mse", test_data_playoff_mapped, test_data["finalPlayoff"], probabilities)))
+    print("R2: " + str(evaluate_model("r2", test_data_playoff_mapped, test_data["finalPlayoff"], probabilities)) + "%")
+
+
     writeAnswerToCsv(test_data['tmID'], probabilities)
     #return the models performance
     return best_model, test_data, best_features, metric_per_feature, evaluate_model("error", test_data_playoff.map({'Y': 1, 'N': 0}), predictions, probabilities)
 
 
-def run_prediction_classifier(metric_to_choose_best_model, year, model = None):
+def run_prediction_classifier(metric_to_choose_best_model, year, model = None, decay = 0.5, num_players = 9):
     def roundProbabilities(test_data, probabilities):
         top_4_teams_ea = test_data[test_data['confID'] == "EA"].nlargest(4, 'probabilities').index
         test_data.loc[top_4_teams_ea, 'finalPlayoff'] = 1
@@ -1008,7 +1031,7 @@ def run_prediction_classifier(metric_to_choose_best_model, year, model = None):
         return adjusted_probs
     
     
-    data, total_ints = getData("Classification", 1, 0.1)
+    data, total_ints = getData("Classification", num_players, decay)
 
     #Get the best model the training data used for the training of the years before the last year and the testing data is the year before the current one.
     best_model, best_features, metric_per_feature = getBestClassificationModelFeaturesParams(data, total_ints, year-1, metric_to_choose_best_model, model)
@@ -1032,7 +1055,6 @@ def run_prediction_classifier(metric_to_choose_best_model, year, model = None):
     test_data['tmID'] = test_data_tmID
     test_data['confID'] = test_data_confID
     test_data['playoff'] = test_data_playoff
-    test_data['finalPlayoff'] = 0
     test_data['probabilities'] = probabilities[:, 1]
 
     #Obtain rounded probabilities.
@@ -1040,6 +1062,12 @@ def run_prediction_classifier(metric_to_choose_best_model, year, model = None):
 
     print("the best model " + str(best_model.__class__.__name__))
     print(test_data)
+    
+
+    print("F1: " + str(evaluate_model("f1", test_data_playoff, predictions, probabilities)) + "%")
+    print("Accuracy: " + str(evaluate_model("acc", test_data_playoff, predictions, probabilities)) + "%")
+    print("AUC: " + str(evaluate_model("auc", test_data_playoff, predictions, probabilities)) + "%")
+    print("Error: " + str(evaluate_model("error", test_data_playoff, predictions, probabilities)))
 
     #return the models performance
     return best_model, test_data, best_features, metric_per_feature, evaluate_model("error", test_data_labels, predictions, probabilities)
@@ -1048,25 +1076,16 @@ def run_prediction_classifier(metric_to_choose_best_model, year, model = None):
 
 
 def main():
-    #best params: XGBClassifier({'learning_rate': 0.1, 'max_depth': 5, 'n_estimators': 200}, player_averages_number = 1 # decay 0.1
     pd.set_option('display.max_rows', None)
 
-    #print(run_prediction_classifier("error", 11))
+
     
-    #best_model, table_data, best_features, metric_per_feature, error = run_prediction_regressor("mae", 10)
-    #plot_roc_curve_regression(best_model, "mae", 10)
-
-    cross_validation_classification()
-    #print(error)
+    best_model, table_data, best_features, metric_per_feature, error = run_prediction_regressor("mae", 10)
 
 
 
 
-    #plot_roc_curve(model, train_data, train_data_labels, test_data, test_data_labels, test_data_confID)
 
-    #run_predictions(data, total_ints, 10, problem_type, metric_to_choose_best_model, True)
-
-    #cross_validation(data, total_ints, problem_type, metric_to_choose_best_model, False)
 
 
     
