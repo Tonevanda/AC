@@ -569,7 +569,7 @@ def grid_search_model(model, train_data, train_data_labels):
     parameter_svr = {
         "C": [0.1, 1],
         "epsilon": [0.1, 0.5],         
-        "kernel": ["linear", "rbf"]
+        "kernel": ["linear", "poly"]
     }
     parameter_dict = {"SVR": parameter_svr}
 
