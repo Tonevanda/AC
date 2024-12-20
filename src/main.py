@@ -733,20 +733,19 @@ def getBestRegressionModelFeaturesParams(data, total_ints, current_year, metric,
 
 
 
-def cross_validation(data, total_ints, problem_type, metric_to_choose_best_model, printResults = False):
-    '''years = []
-    models = getClassificationModels()
+def cross_validation_regression():
+    years = []
+    models = getRegressionModels()
     model_names = [model.__class__.__name__ for model in models]
     model_lines = {}
     for model_name in model_names:
         model_lines[model_name] = []
-    for year in range(3, 11):
+    for year in range(4, 11):
         years.append(year)
-        results = run_predictions(data, total_ints, year, problem_type, metric_to_choose_best_model, printResults)
-        for (model, _, stats) in results:
-            for (metric, stat) in stats:
-                if metric == metric_to_choose_best_model:
-                    model_lines[model.__class__.__name__].append(stat)
+        for model in models:
+            best_model, table_data, best_features, metric_per_feature, error = run_prediction_regressor("mae", year, model)
+
+            model_lines[best_model.__class__.__name__].append(error)
 
     model_stats = pd.DataFrame({model_name: model_lines[model_name] for model_name in model_names})
 
@@ -754,12 +753,40 @@ def cross_validation(data, total_ints, problem_type, metric_to_choose_best_model
     model_stats = model_stats.astype(float)
     model_stats.plot(kind="line")
     plt.xlabel('Year')
-    plt.ylabel(metric_to_choose_best_model)
-    plt.title("Model's " + metric_to_choose_best_model + " over the years of training and testing")
+    plt.ylabel("error")
+    plt.title("Model's error over the years of training and testing")
     plt.xticks(years, labels=years)
     plt.legend(title="Models")
     plt.tight_layout()
-    plt.show()'''
+    plt.show()
+
+
+def cross_validation_classification():
+    years = []
+    models = getClassificationModels()
+    model_names = [model.__class__.__name__ for model in models]
+    model_lines = {}
+    for model_name in model_names:
+        model_lines[model_name] = []
+    for year in range(4, 11):
+        years.append(year)
+        for model in models:
+            best_model, table_data, best_features, metric_per_feature, error = run_prediction_classifier("error", year, model)
+
+            model_lines[best_model.__class__.__name__].append(error)
+
+    model_stats = pd.DataFrame({model_name: model_lines[model_name] for model_name in model_names})
+
+    model_stats.index = years
+    model_stats = model_stats.astype(float)
+    model_stats.plot(kind="line")
+    plt.xlabel('Year')
+    plt.ylabel("error")
+    plt.title("Model's error over the years of training and testing")
+    plt.xticks(years, labels=years)
+    plt.legend(title="Models")
+    plt.tight_layout()
+    plt.show()
 
 
 
@@ -1026,9 +1053,11 @@ def main():
 
     #print(run_prediction_classifier("error", 11))
     
-    best_model, table_data, best_features, metric_per_feature, error = run_prediction_regressor("mae", 10)
-    plot_roc_curve_regression(best_model, "mae", 10)
-    print(error)
+    #best_model, table_data, best_features, metric_per_feature, error = run_prediction_regressor("mae", 10)
+    #plot_roc_curve_regression(best_model, "mae", 10)
+
+    cross_validation_classification()
+    #print(error)
 
 
 
