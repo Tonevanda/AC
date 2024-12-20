@@ -221,32 +221,6 @@ def rename_attributes(data, player_info):
         counter += 1
     # Rename the columns to Best Player (BP)
     return data.rename(columns=columns)
-    
-def profile_plot(data):
-    plot_data = data.copy()
-    # Convert 'playoff' column to string type
-    
-    plot_data.drop(columns=['tmID',"playoff"], inplace=True)
-    # Normalize the column values
-    scaler = MinMaxScaler()
-    plot_data[plot_data.columns] = scaler.fit_transform(plot_data[plot_data.columns])
-    
-    # Add 'playoff' column back
-    plot_data['playoff'] = data['playoff']
-    
-    # Group by 'playoff' and calculate the mean for each group
-    plot_data_grouped = plot_data.groupby('playoff').mean().reset_index()
-    
-    # Save normalized data to CSV
-    plot_data_grouped.to_csv("data_normalized2.csv", index=False)
-    
-    # Plotting the parallel coordinates plot
-    """plt.figure(figsize=(20, 12))
-    pd.plotting.parallel_coordinates(plot_data, 'playoff', color=('#556270', '#4ECDC4'))
-    plt.title('Profile Plot of Team Data')
-    plt.xlabel('Attributes')
-    plt.ylabel('Values')
-    plt.show()"""
 
 def fillCompData(problem_type, teams, coaches, players_teams):
     def fixMissingColumns(tableWithData, tableWithMissingData):
